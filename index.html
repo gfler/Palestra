@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="it">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0F1218">
+  <meta name="color-scheme" content="dark">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Fulcro">
+  <title>Fulcro — analisi biomeccanica</title>
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" href="icons/icon-192.png" type="image/png">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=Instrument+Sans:wght@400;500;600;700&display=swap">
+  <link rel="stylesheet" href="styles.css">
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
+  <script type="module" src="app.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <svg class="logo" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="9" fill="#FFB547"/><path d="M8 24 L16 9 L25 24" fill="none" stroke="#0F1218" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/><circle cx="16" cy="9" r="3.2" fill="#0F1218"/></svg>
+      <span class="brand-name">Fulcro</span>
+    </div>
+    <div class="top-actions">
+      <button id="syncBadge" class="badge" type="button" data-state="idle">Sheets non connesso</button>
+      <button id="btnSettings" class="icon-btn" type="button" aria-label="Impostazioni">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z"/><path d="M19.4 13.5a7.7 7.7 0 0 0 0-3l2-1.5-2-3.4-2.3.9a7.6 7.6 0 0 0-2.6-1.5L14 2.5h-4l-.5 2.5a7.6 7.6 0 0 0-2.6 1.5l-2.3-.9-2 3.4 2 1.5a7.7 7.7 0 0 0 0 3l-2 1.5 2 3.4 2.3-.9a7.6 7.6 0 0 0 2.6 1.5l.5 2.5h4l.5-2.5a7.6 7.6 0 0 0 2.6-1.5l2.3.9 2-3.4-2-1.5Z"/></svg>
+      </button>
+    </div>
+  </header>
+
+  <main id="app">
+    <!-- 1. Scelta video -->
+    <section id="intake" class="intake">
+      <h1 class="headline">Guarda la tecnica,<br>non solo il peso.</h1>
+      <p class="lede">Carica il video di una serie. Fulcro conta le rep, misura angoli e tempi, e salva tutto sul tuo foglio Google.</p>
+      <label class="drop" for="fileInput">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V5m0 0-4 4m4-4 4 4M5 15v3a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-3"/></svg>
+        <span class="drop-title">Scegli o registra un video</span>
+        <span class="drop-sub">Meglio di lato, con tutto il corpo in inquadratura</span>
+      </label>
+      <input id="fileInput" class="sr-only" type="file" accept="video/*">
+      <button id="btnImport" class="link-btn" type="button">Ho già un'analisi salvata (.json)</button>
+      <input id="importInput" class="sr-only" type="file" accept="application/json,.json">
+    </section>
+
+    <!-- 2. Impostazioni serie -->
+    <section id="setup" class="card" hidden>
+      <div class="card-head"><h2>La serie</h2><button id="btnChange" class="link-btn" type="button">Cambia video</button></div>
+
+      <fieldset class="seg" id="segSession">
+        <legend>Scheda</legend>
+        <div class="seg-row">
+        <label><input type="radio" name="session" value="Day A" checked><span>Day A</span></label>
+        <label><input type="radio" name="session" value="Day B"><span>Day B</span></label>
+        <label><input type="radio" name="session" value="Extra"><span>Extra</span></label></div>
+      </fieldset>
+
+      <fieldset class="seg seg-profile" id="segProfile">
+        <legend>Profilo biomeccanico</legend>
+        <div class="seg-row">
+        <label><input type="radio" name="profile" value="rdl" checked><span>RDL</span></label>
+        <label><input type="radio" name="profile" value="squat"><span>Squat</span></label>
+        <label><input type="radio" name="profile" value="bench"><span>Panca</span></label>
+        <label><input type="radio" name="profile" value="generic"><span>Generico</span></label></div>
+      </fieldset>
+
+      <div class="fields">
+        <label class="field field-wide"><span>Esercizio</span><input id="exName" type="text" autocomplete="off" value="Stacco Rumeno (RDL)"></label>
+        <label class="field"><span>Carico (kg)</span><input id="load" type="number" inputmode="decimal" min="0" step="0.5" placeholder="0"></label>
+        <label class="field"><span>Note / RPE</span><input id="notes" type="text" autocomplete="off" placeholder="opzionale"></label>
+      </div>
+
+      <button id="btnAnalyze" class="btn btn-primary" type="button">Analizza il video</button>
+
+      <div id="progress" class="progress" hidden>
+        <div class="progress-track"><i id="progressFill"></i></div>
+        <div class="progress-row"><span id="progressText" role="status">Preparo l'analisi…</span><button id="btnCancel" class="link-btn" type="button">Annulla</button></div>
+      </div>
+    </section>
+
+    <!-- 3. Player -->
+    <section id="player" class="player" hidden>
+      <div class="stage" id="stage">
+        <video id="video" playsinline muted preload="auto"></video>
+        <canvas id="hud" aria-hidden="true"></canvas>
+      </div>
+
+      <div class="timeline">
+        <div class="timeline-rail">
+          <div id="trimShade" class="trim-shade"></div>
+          <div id="ticks" class="ticks" aria-label="Ripetizioni sulla timeline"></div>
+          <input id="seek" type="range" min="0" max="1000" value="0" step="1" aria-label="Posizione del video">
+        </div>
+        <div class="time-row"><span id="timeNow">0:00.0</span><span id="timeTotal">0:00.0</span></div>
+      </div>
+
+      <div class="transport">
+        <button id="btnPrevRep" class="tbtn" type="button" aria-label="Rep precedente"><svg viewBox="0 0 24 24"><path d="M6 5v14M19 5l-9 7 9 7V5Z"/></svg></button>
+        <button id="btnStepBack" class="tbtn" type="button" aria-label="Frame indietro"><svg viewBox="0 0 24 24"><path d="m15 6-6 6 6 6"/></svg></button>
+        <button id="btnPlay" class="tbtn tbtn-main" type="button" aria-label="Riproduci"><svg id="iconPlay" viewBox="0 0 24 24"><path d="M8 5v14l11-7L8 5Z"/></svg><svg id="iconPause" viewBox="0 0 24 24" hidden><path d="M8 5v14M16 5v14"/></svg></button>
+        <button id="btnStepFwd" class="tbtn" type="button" aria-label="Frame avanti"><svg viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></svg></button>
+        <button id="btnNextRep" class="tbtn" type="button" aria-label="Rep successiva"><svg viewBox="0 0 24 24"><path d="M18 5v14M5 5l9 7-9 7V5Z"/></svg></button>
+      </div>
+
+      <div class="controls-row">
+        <fieldset class="chips" id="speedChips">
+          <legend class="sr-only">Velocità</legend>
+        <div class="chips-row">
+          <label><input type="radio" name="speed" value="0.25"><span>0.25×</span></label>
+          <label><input type="radio" name="speed" value="0.5"><span>0.5×</span></label>
+          <label><input type="radio" name="speed" value="1" checked><span>1×</span></label></div>
+      </fieldset>
+        <div class="trim-btns">
+          <button id="btnTrimStart" class="chip-btn" type="button">Inizio serie</button>
+          <button id="btnTrimEnd" class="chip-btn" type="button">Fine serie</button>
+          <button id="btnTrimReset" class="chip-btn chip-ghost" type="button" hidden>Azzera</button>
+        </div>
+      </div>
+
+      <details class="layers">
+        <summary>Livelli dell'HUD</summary>
+        <div id="layerChips" class="chips chips-wrap"></div>
+      </details>
+    </section>
+
+    <!-- 4. Report -->
+    <section id="report" class="report" hidden>
+      <div id="qualityBox" class="quality"></div>
+
+      <div class="kpis">
+        <div class="kpi"><span class="kpi-label">Ripetizioni</span><span id="kpiTotal" class="kpi-num">0</span></div>
+        <div class="kpi kpi-good"><span class="kpi-label">Corrette</span><span id="kpiValid" class="kpi-num">0</span></div>
+        <div class="kpi kpi-bad"><span class="kpi-label">Da migliorare</span><span id="kpiBad" class="kpi-num">0</span></div>
+      </div>
+
+      <div class="verdict"><h2>Verdetto tecnico</h2><p id="verdict"></p></div>
+
+      <div class="card flush">
+        <table class="spec" id="specTable">
+          <thead><tr><th>Parametro</th><th>Il tuo valore</th><th><span class="sr-only">Esito</span></th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+
+      <div class="card" id="repsCard">
+        <h2>Rep per rep</h2>
+        <ol id="repList" class="rep-list"></ol>
+      </div>
+
+      <div class="card" id="fatigueCard" hidden>
+        <h2>Tempo concentrico per rep</h2>
+        <div id="fatigueChart" class="fatigue"></div>
+        <p id="fatigueText" class="muted"></p>
+      </div>
+
+      <div class="card" id="compareCard" hidden>
+        <h2 id="compareTitle">Rispetto all'ultima volta</h2>
+        <ul id="compareList" class="compare"></ul>
+      </div>
+
+      <div class="card" id="aiCard" hidden>
+        <h2>Coach AI</h2>
+        <p id="aiText" class="muted">Invia solo le metriche numeriche (mai il video) a Gemini.</p>
+      </div>
+
+      <div class="actions">
+        <button id="btnAi" class="btn btn-ghost" type="button" hidden>Analisi AI della serie</button>
+        <button id="btnExport" class="btn btn-ghost" type="button">Esporta analisi (.json)</button>
+      </div>
+    </section>
+
+    <!-- 5. Registro sessione -->
+    <section id="logSection" class="card" hidden>
+      <div class="card-head"><h2>Registro di oggi</h2><button id="btnClearLog" class="link-btn" type="button">Svuota</button></div>
+      <ul id="sessionLog" class="session-log"></ul>
+      <button id="btnClose" class="btn btn-ghost" type="button">Chiudi sessione (copia riepilogo)</button>
+    </section>
+  </main>
+
+  <div id="dock" class="dock" hidden>
+    <div id="seriesStatus" class="dock-status" role="status"></div>
+    <button id="btnSend" class="btn btn-primary" type="button">Invia serie a Sheets</button>
+  </div>
+
+  <!-- Impostazioni -->
+  <dialog id="settings" aria-labelledby="settingsTitle">
+    <form method="dialog" id="settingsForm">
+      <div class="dlg-head"><h2 id="settingsTitle">Impostazioni</h2><button class="icon-btn" value="cancel" aria-label="Chiudi">×</button></div>
+
+      <h3>Google Sheets</h3>
+      <label class="field field-wide"><span>Google OAuth Client ID</span><input id="setClientId" type="text" autocomplete="off" spellcheck="false" placeholder="123…apps.googleusercontent.com"></label>
+      <label class="field field-wide"><span>URL del Foglio Google</span><input id="setSheetUrl" type="url" autocomplete="off" spellcheck="false" placeholder="https://docs.google.com/spreadsheets/d/…"></label>
+      <p class="hint">Nella Google Cloud Console, tra le «Origini JavaScript autorizzate» del Client ID aggiungi: <code id="originHint"></code></p>
+
+      <label class="switch"><input id="setAuto" type="checkbox"><span>Salva automaticamente su Google Sheets dopo ogni analisi</span></label>
+      <label class="switch"><input id="setWeekly" type="checkbox"><span>Aggiorna il tab «Riepilogo_Settimanale»</span></label>
+
+      <div class="dlg-row">
+        <button id="btnConnect" class="btn btn-primary" type="button">Connetti Google Sheets</button>
+        <button id="btnHistory" class="btn btn-ghost" type="button">Importa storico dal foglio</button>
+      </div>
+      <p id="connectMsg" class="hint" role="status"></p>
+
+      <h3>Coach AI (opzionale)</h3>
+      <label class="field field-wide"><span>API Key Google Gemini</span><input id="setGemini" type="password" autocomplete="off" spellcheck="false" placeholder="AIza…"></label>
+      <p class="hint">La chiave resta solo su questo dispositivo. A Gemini viene inviato il JSON delle metriche, mai il video.</p>
+
+      <div class="dlg-foot">
+        <button id="btnInstall" class="btn btn-ghost" type="button" hidden>Installa l'app</button>
+        <button id="btnSaveSettings" class="btn btn-primary" value="save">Salva</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div id="toasts" class="toasts" aria-live="polite"></div>
+</body>
+</html>
