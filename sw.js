@@ -1,13 +1,13 @@
 // sw.js — cache offline dell'app (shell) e dei file pesanti di MediaPipe (WASM + modello).
-const VERSION = 'v1';
+const VERSION = 'v2';
 const SHELL_CACHE = `fulcro-shell-${VERSION}`;
 const RUNTIME_CACHE = `fulcro-runtime-${VERSION}`;
 const SHELL = [
   './', 'index.html', 'styles.css', 'app.js', 'biomechanics.js', 'poseEngine.js', 'hudRenderer.js',
-  'sheetsSync.js', 'manifest.json', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png',
+  'sheetsSync.js', 'training.js', 'dom.js', 'store.js', 'exdb.js', 'charts.js', 'exDetail.js', 'viewTrain.js', 'viewPrograms.js', 'viewStats.js', 'viewCoach.js', 'coach.js', 'nav.js', 'manifest.json', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png',
 ];
 // Solo risorse statiche: mai le API di Google (Sheets, Gemini, login), che devono passare sempre dalla rete.
-const CDN_HOSTS = ['cdn.jsdelivr.net', 'fonts.googleapis.com', 'fonts.gstatic.com'];
+const CDN_HOSTS = ['cdn.jsdelivr.net', 'fonts.googleapis.com', 'fonts.gstatic.com', 'raw.githubusercontent.com'];
 const isModel = (url) => url.hostname === 'storage.googleapis.com' && url.pathname.startsWith('/mediapipe-models/');
 
 self.addEventListener('install', (event) => {
@@ -26,7 +26,7 @@ async function staleWhileRevalidate(request, cacheName) {
   const cache = await caches.open(cacheName);
   const cached = await cache.match(request, { ignoreSearch: false });
   const network = fetch(request).then((res) => {
-    if (res && res.ok) cache.put(request, res.clone());
+    if (res && (res.ok || res.type === 'opaque')) cache.put(request, res.clone());
     return res;
   }).catch(() => null);
   return cached || (await network) || Response.error();
@@ -37,7 +37,7 @@ async function cacheFirst(request, cacheName) {
   const cached = await cache.match(request);
   if (cached) return cached;
   const res = await fetch(request);
-  if (res && res.ok) cache.put(request, res.clone());
+  if (res && (res.ok || res.type === 'opaque')) cache.put(request, res.clone());
   return res;
 }
 

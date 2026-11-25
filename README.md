@@ -48,3 +48,16 @@ Con l'opzione attiva viene creato anche il tab `Riepilogo_Settimanale` (serie, r
 
 ## Struttura
 `index.html` · `styles.css` · `app.js` · `poseEngine.js` · `biomechanics.js` · `hudRenderer.js` · `sheetsSync.js` · `manifest.json` · `sw.js` · `icons/`
+
+## Novità v2 — Allenamento
+
+Quattro sezioni in basso: **Allenamento** (registro serie, recuperi, suggerimenti di carico), **Schede** (le tue schede, incolla da testo o crea a mano, archivio), **Progressi** (costanza, volume, andamento per esercizio continuo tra schede diverse, muscoli) e **Tecnica** (l'analisi video).
+
+- Dati sul telefono (localStorage). Scarica ogni tanto un backup da Impostazioni → Allenamento.
+- Con Google Sheets collegato, ogni allenamento aggiunge righe al tab `Serie_Dettaglio`.
+- Libreria esercizi: Free Exercise DB (pubblico dominio), scaricata al primo uso e poi in cache. Istruzioni in inglese.
+
+Aggiornamento: sostituisci nella radice del repository tutti i file (anche i nuovi: `dom.js`, `store.js`, `exdb.js`, `charts.js`, `exDetail.js`, `viewTrain.js`, `viewPrograms.js`, `viewStats.js`, `nav.js`, `training.js`).
+
+## Novità v3
+Calendario mensile (Progressi), Coach (riscaldamento, defaticamento, consigli di carico che tengono conto di rep, RIR e video; domande libere con Gemini), serie di riscaldamento automatiche, superset, rilevamento dei plateau e settimana di scarico. File nuovi: `coach.js`, `viewCoach.js`.

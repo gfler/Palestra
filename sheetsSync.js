@@ -211,6 +211,46 @@ export async function syncSeries(series, { interactive = true } = {}) {
   }
 }
 
+
+/* ------------------------------ allenamento: serie di dettaglio ------------------------------ */
+
+export const T_TAB = 'Serie_Dettaglio';
+export const T_HEADER = [
+  'Data', 'Ora', 'Programma', 'Giorno', 'Esercizio', 'Serie', 'Tipo', 'Kg', 'Rep', 'RIR', 'Recupero_s', 'Nota', '1RM_Stimato',
+];
+const TQ_KEY = 'fulcro.tqueue';
+
+export const isConfigured = () => !!(getSettings().clientId && parseSpreadsheetId(getSettings().sheetUrl));
+export const getTrainQueue = () => lsGet(TQ_KEY, []);
+
+/** Mette in coda le righe di un allenamento (idempotente per id). */
+export function enqueueWorkout(id, rows) {
+  const q = getTrainQueue().filter((x) => x.id !== id);
+  q.push({ id, rows });
+  lsSet(TQ_KEY, q);
+}
+
+export async function flushTraining({ interactive = true } = {}) {
+  const q = getTrainQueue();
+  if (!q.length) return [];
+  if (!navigator.onLine) throw Object.assign(new Error('Offline'), { code: 'OFFLINE' });
+  if (!isConnected() && !interactive) throw Object.assign(new Error('Serve un tocco per riconnettere Google'), { code: 'AUTH' });
+  const id = sheetId();
+  await ensureTab(id, T_TAB);
+  const r = await gfetch(`${API}/${id}/values/${enc(`${T_TAB}!A1:Z1`)}`);
+  if (!r.values || !r.values.length || !r.values[0].some((c) => String(c).trim() !== '')) {
+    await gfetch(`${API}/${id}/values/${enc(`${T_TAB}!A1`)}?valueInputOption=RAW`, { method: 'PUT', body: JSON.stringify({ values: [T_HEADER] }) });
+  }
+  const values = q.flatMap((x) => x.rows);
+  if (values.length) {
+    await gfetch(`${API}/${id}/values/${enc(`${T_TAB}!A1`)}:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`, {
+      method: 'POST', body: JSON.stringify({ values }),
+    });
+  }
+  lsSet(TQ_KEY, []);
+  return q.map((x) => x.id);
+}
+
 /* ------------------------------ lettura storico ------------------------------ */
 
 function serialToDate(v) {
@@ -358,4 +398,30 @@ export async function askCoach(apiKey, payload) {
     ? j.candidates[0].content.parts.map((p) => p.text || '').join('').trim() : '';
   if (!text) throw new Error('Risposta vuota da Gemini');
   return text;
+}
+
+/** Domanda libera a Gemini con un'istruzione di sistema propria. */
+export async function askGemini(apiKey, system, text) {
+  let res;
+  try {
+    res = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
+      body: JSON.stringify({
+        systemInstruction: { parts: [{ text: system }] },
+        contents: [{ role: 'user', parts: [{ text }] }],
+        generationConfig: { temperature: 0.5, maxOutputTokens: 1200, thinkingConfig: { thinkingBudget: 0 } },
+      }),
+    });
+  } catch { throw new Error('Rete non disponibile'); }
+  if (!res.ok) {
+    let msg = `Errore Gemini ${res.status}`;
+    try { const j = await res.json(); msg = (j.error && j.error.message) || msg; } catch { /* non JSON */ }
+    throw new Error(msg);
+  }
+  const j = await res.json();
+  const out = j.candidates && j.candidates[0] && j.candidates[0].content && j.candidates[0].content.parts
+    ? j.candidates[0].content.parts.map((p) => p.text || '').join('').trim() : '';
+  if (!out) throw new Error('Risposta vuota da Gemini');
+  return out;
 }

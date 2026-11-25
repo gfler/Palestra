@@ -9,7 +9,7 @@
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="Fulcro">
-  <title>Fulcro — analisi biomeccanica</title>
+  <title>Fulcro — allenamento e tecnica</title>
   <link rel="manifest" href="manifest.json">
   <link rel="icon" href="icons/icon-192.png" type="image/png">
   <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -19,6 +19,7 @@
   <link rel="stylesheet" href="styles.css">
   <script src="https://accounts.google.com/gsi/client" async defer></script>
   <script type="module" src="app.js"></script>
+  <script type="module" src="nav.js"></script>
 </head>
 <body>
   <header class="topbar">
@@ -34,7 +35,11 @@
     </div>
   </header>
 
-  <main id="app">
+  <main id="v-train" class="view" hidden></main>
+  <main id="v-prog" class="view" hidden></main>
+  <main id="v-stats" class="view" hidden></main>
+
+  <main id="app" class="view" hidden>
     <!-- 1. Scelta video -->
     <section id="intake" class="intake">
       <h1 class="headline">Guarda la tecnica,<br>non solo il peso.</h1>
@@ -183,6 +188,8 @@
     </section>
   </main>
 
+  <nav id="tabbar" class="tabbar" aria-label="Sezioni"></nav>
+
   <div id="dock" class="dock" hidden>
     <div id="seriesStatus" class="dock-status" role="status"></div>
     <button id="btnSend" class="btn btn-primary" type="button">Invia serie a Sheets</button>
@@ -206,6 +213,16 @@
         <button id="btnHistory" class="btn btn-ghost" type="button">Importa storico dal foglio</button>
       </div>
       <p id="connectMsg" class="hint" role="status"></p>
+
+      <h3>Allenamento</h3>
+      <label class="field field-wide"><span>Incremento di carico suggerito</span>
+        <select id="setInc"><option value="1">1 kg</option><option value="1.25">1,25 kg</option><option value="2.5">2,5 kg</option><option value="5">5 kg</option></select></label>
+      <div class="dlg-row">
+        <button id="btnBackup" class="btn btn-ghost" type="button">Scarica backup allenamenti</button>
+        <button id="btnRestore" class="btn btn-ghost" type="button">Ripristina da backup</button>
+      </div>
+      <input id="restoreInput" class="sr-only" type="file" accept="application/json,.json">
+      <p class="hint">I dati degli allenamenti stanno su questo telefono: scarica un backup ogni tanto, soprattutto prima di cambiare telefono.</p>
 
       <h3>Coach AI (opzionale)</h3>
       <label class="field field-wide"><span>API Key Google Gemini</span><input id="setGemini" type="password" autocomplete="off" spellcheck="false" placeholder="AIza…"></label>

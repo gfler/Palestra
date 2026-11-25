@@ -897,6 +897,12 @@ $('#btnInstall').addEventListener('click', async () => {
 /* ------------------------------------------------------------------ */
 
 $('#exName').value = PROFILES.rdl.defaultName;
+window.fulcroTech = {
+  prefill({ exercise, load, profile }) {
+    applySetup({ exercise, load: load || 0, profile });
+    onMetaChange();
+  },
+};
 renderSession();
 updateBadge();
 
