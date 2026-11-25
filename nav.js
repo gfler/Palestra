@@ -34,7 +34,20 @@ function buildTabbar() {
   }, icon(v.icon, 24), h('span', {}, v.label), k === 'train' ? h('i', { class: 'tab-dot', hidden: true }) : null)));
 }
 
+const APP_VERSION = '3.1';
+
 function bindSettings() {
+  const ver = $('#verLabel');
+  if (ver) ver.textContent = `Versione ${APP_VERSION}. Se vedi una grafica strana dopo un aggiornamento, tocca il pulsante qui sopra: non cancella i tuoi dati.`;
+  const fu = $('#btnForceUpdate');
+  if (fu) fu.addEventListener('click', async () => {
+    fu.disabled = true; fu.textContent = 'Aggiorno…';
+    try {
+      if ('serviceWorker' in navigator) { const regs = await navigator.serviceWorker.getRegistrations(); await Promise.all(regs.map((r) => r.unregister())); }
+      if (window.caches) { const keys = await caches.keys(); await Promise.all(keys.filter((k) => k.startsWith('fulcro-shell')).map((k) => caches.delete(k))); }
+    } catch { /* ignora */ }
+    location.reload();
+  });
   const inc = $('#setInc');
   if (inc) {
     inc.value = String(store.getInc());

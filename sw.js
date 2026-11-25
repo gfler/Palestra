@@ -1,5 +1,5 @@
 // sw.js — cache offline dell'app (shell) e dei file pesanti di MediaPipe (WASM + modello).
-const VERSION = 'v2';
+const VERSION = 'v3';
 const SHELL_CACHE = `fulcro-shell-${VERSION}`;
 const RUNTIME_CACHE = `fulcro-runtime-${VERSION}`;
 const SHELL = [
@@ -22,14 +22,20 @@ self.addEventListener('activate', (event) => {
   );
 });
 
-async function staleWhileRevalidate(request, cacheName) {
+// File dell'app: prima la rete (sempre aggiornati, niente miscugli di versioni), cache solo se offline o lenta.
+async function networkFirst(request, cacheName) {
   const cache = await caches.open(cacheName);
-  const cached = await cache.match(request, { ignoreSearch: false });
-  const network = fetch(request).then((res) => {
-    if (res && (res.ok || res.type === 'opaque')) cache.put(request, res.clone());
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), 5000);
+  try {
+    const res = await fetch(new Request(request, { cache: 'no-cache' }), { signal: ctl.signal });
+    clearTimeout(timer);
+    if (res && res.ok) cache.put(request, res.clone());
     return res;
-  }).catch(() => null);
-  return cached || (await network) || Response.error();
+  } catch {
+    clearTimeout(timer);
+    return (await cache.match(request)) || Response.error();
+  }
 }
 
 async function cacheFirst(request, cacheName) {
@@ -48,10 +54,10 @@ self.addEventListener('fetch', (event) => {
 
   if (url.origin === self.location.origin) {
     if (req.mode === 'navigate') {
-      event.respondWith(fetch(req).catch(() => caches.match('index.html')));
+      event.respondWith(fetch(new Request(req, { cache: 'no-cache' })).catch(() => caches.match('index.html')));
       return;
     }
-    event.respondWith(staleWhileRevalidate(req, SHELL_CACHE));
+    event.respondWith(networkFirst(req, SHELL_CACHE));
     return;
   }
   if (isModel(url) || CDN_HOSTS.includes(url.hostname)) {

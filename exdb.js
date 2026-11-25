@@ -9,7 +9,7 @@ let db = null;
 let loading = null;
 let failed = null;
 
-export const imgUrl = (p) => `${BASE}exercises/${String(p).split('/').map(encodeURIComponent).join('/')}`;
+export const imgUrl = (p) => `https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/${String(p).split('/').map(encodeURIComponent).join('/')}`;
 export const getDb = () => db;
 export const dbError = () => failed;
 

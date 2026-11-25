@@ -18,7 +18,13 @@ export function guessProfile(name) {
   return 'generic';
 }
 
-const photo = (ex, i = 0) => (ex && ex.im[i] ? h('img', { class: 'ex-img', src: imgUrl(ex.im[i]), alt: `${ex.n}, posizione ${i + 1}`, loading: 'lazy', decoding: 'async' }) : null);
+const photo = (ex, i = 0) => {
+  if (!ex || !ex.im[i]) return null;
+  const img = h('img', { class: 'ex-img', src: imgUrl(ex.im[i]), alt: `${ex.n}, posizione ${i + 1}`, loading: 'lazy', decoding: 'async' });
+  img.addEventListener('error', () => { img.classList.add('broken'); img.alt = ''; });
+  img.addEventListener('load', () => img.classList.add('ok'));
+  return img;
+};
 
 /** Miniatura per elenchi (può essere null finché la libreria non è caricata). */
 export function thumb(name, dbId) {

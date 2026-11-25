@@ -201,6 +201,18 @@ function weekStart(d = new Date()) {
   return x;
 }
 
+function weekStrip(workouts) {
+  const m0 = weekStart().getTime();
+  const trained = new Set(workouts.map((w) => new Date(w.startedAt).toLocaleDateString('sv-SE')));
+  const today = new Date().toLocaleDateString('sv-SE');
+  return h('div', { class: 'week', role: 'img', 'aria-label': 'Allenamenti di questa settimana' },
+    ['L', 'M', 'M', 'G', 'V', 'S', 'D'].map((l, i) => {
+      const day = new Date(m0 + i * 86400000);
+      const key = day.toLocaleDateString('sv-SE');
+      return h('span', { class: `week-d${trained.has(key) ? ' on' : ''}${key === today ? ' today' : ''}` }, l, h('i', {}, trained.has(key) ? icon('check', 18) : null));
+    }));
+}
+
 function renderHome() {
   const r = root();
   const prog = store.activeProgram();
@@ -214,6 +226,7 @@ function renderHome() {
     h('p', { class: 'lede' }, workouts.length
       ? `${thisWeek.length} ${thisWeek.length === 1 ? 'allenamento' : 'allenamenti'} questa settimana · ${fmtNum(thisWeek.reduce((a, w) => a + workoutVolume(w), 0))} kg di volume.`
       : 'Inserisci la tua scheda, registra serie e recuperi, guarda i progressi nel tempo.')));
+  if (workouts.length) nodes.push(weekStrip(workouts));
 
   if (!prog) {
     nodes.push(h('section', { class: 'card empty' },
@@ -229,8 +242,7 @@ function renderHome() {
       prog.days.length ? h('div', { class: 'day-list' }, prog.days.map((d, i) => {
         const last = workouts.filter((w) => w.dayId === d.id).at(-1);
         return h('button', { class: `day-btn${i === nextIdx ? ' next' : ''}`, type: 'button', onclick: () => startWorkout(prog, d, { deload: deloadOn() }) },
-          h('span', { class: 'day-t' }, h('b', {}, d.name), h('small', {}, `${d.exercises.length} esercizi${last ? ` · ultima volta ${fmtDay(last.startedAt)}` : ''}`)),
-          i === nextIdx ? h('span', { class: 'pill pill-amber' }, 'Tocca a questo') : null,
+          h('span', { class: 'day-t' }, i === nextIdx ? h('em', { class: 'next-tag' }, 'Prossimo') : null, h('b', {}, d.name), h('small', {}, i === nextIdx ? `${d.exercises.slice(0, 3).map((e) => e.name).join(' · ')}${d.exercises.length > 3 ? ` · +${d.exercises.length - 3}` : ''}` : `${d.exercises.length} esercizi${last ? ` · ultima volta ${fmtDay(last.startedAt)}` : ''}`)),
           icon('play', 22));
       })) : h('p', { class: 'muted' }, 'Questa scheda non ha ancora giorni: aggiungili da «Gestisci».'),
       h('button', { class: 'btn btn-ghost', type: 'button', onclick: () => startWorkout(null, null) }, 'Allenamento libero')));
@@ -309,20 +321,19 @@ function renderActive() {
   const W = store.getActive();
   const r = root();
   const elapsed = h('b', { class: 'elapsed' }, '0 min');
-  const bye = h('button', { class: 'link-btn danger', type: 'button' }, 'Scarta');
+  const bye = h('button', { class: 'link-btn danger', type: 'button' }, 'Scarta allenamento');
   confirmTap(bye, 'Tocca di nuovo per scartare', () => { store.setActive(null); releaseScreen(); runTick(); render(); toast('Allenamento scartato'); });
 
   const head = h('section', { class: 'card wo-head' },
-    h('div', { class: 'card-head' },
-      h('div', {}, h('h1', { class: 'wo-title' }, W.dayName), h('p', { class: 'muted' }, `${W.programName || 'Libero'} · `, elapsed)),
-      bye),
+    h('div', {}, h('h1', { class: 'wo-title' }, W.dayName), h('p', { class: 'muted' }, `${W.programName || 'Libero'} · `, elapsed)),
     h('div', { class: 'btn-row' },
-      h('button', { class: 'btn btn-ghost', type: 'button', onclick: () => openCoach({ tab: 'warm', sel: 'active' }) }, 'Coach'),
-      h('button', { class: 'btn btn-primary', type: 'button', onclick: finishWorkout }, 'Termina allenamento')));
+      h('button', { class: 'btn btn-ghost btn-sm', type: 'button', onclick: () => openCoach({ tab: 'warm', sel: 'active' }) }, 'Coach'),
+      h('button', { class: 'btn btn-primary btn-sm', type: 'button', onclick: finishWorkout }, 'Termina')));
 
   const cards = W.exercises.map((ex, i) => exerciseCard(W, ex, i));
   const add = h('button', { class: 'btn btn-ghost', type: 'button', onclick: () => addExerciseSheet(W) }, icon('plus', 20), ' Aggiungi esercizio');
-  r.replaceChildren(prepCard(W, 'warm'), head, ...cards, add, prepCard(W, 'cool'));
+  r.replaceChildren(head, prepCard(W, 'warm'), ...cards, add, prepCard(W, 'cool'), h('div', { class: 'wo-foot' }, bye));
+  markNow();
 
   clearInterval(elapsedId);
   const upd = () => { elapsed.textContent = fmtDuration((Date.now() - new Date(W.startedAt)) / 1000); };
@@ -348,6 +359,13 @@ function prepCard(W, kind) {
   return h('details', { class: 'card prep' }, h('summary', {}, kind === 'warm' ? 'Riscaldamento ' : 'Defaticamento ', sum), ...rows);
 }
 
+function markNow() {
+  const rows = [...document.querySelectorAll('#v-train .set-row')];
+  rows.forEach((r) => r.classList.remove('now'));
+  const next = rows.find((r) => !r.classList.contains('done') && r.dataset.type !== 'warmup') || rows.find((r) => !r.classList.contains('done'));
+  if (next) next.classList.add('now');
+}
+
 function exerciseCard(W, ex, ei) {
   const prevLinked = ei > 0 && W.exercises[ei - 1].link;
   const nextEx = W.exercises[ei + 1];
@@ -368,7 +386,7 @@ function exerciseCard(W, ex, ei) {
     restChip);
 
   const rows = ex.sets.map((s, si) => setRow(W, ex, ei, s, si, refresh, rebuild));
-  function rebuild() { body.replaceChildren(...ex.sets.map((s, si) => setRow(W, ex, ei, s, si, refresh, rebuild))); refresh(); }
+  function rebuild() { body.replaceChildren(...ex.sets.map((s, si) => setRow(W, ex, ei, s, si, refresh, rebuild))); refresh(); markNow(); }
   body.append(...rows);
 
   const noteBox = h('textarea', { class: 'ex-note', rows: '2', placeholder: 'Nota su questo esercizio (regolazioni, sensazioni…)', 'aria-label': `Nota ${ex.name}`, hidden: !ex.note, value: ex.note || '' });

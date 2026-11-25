@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="theme-color" content="#0F1218">
+  <meta name="theme-color" content="#0E0F0D">
   <meta name="color-scheme" content="dark">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -24,7 +24,7 @@
 <body>
   <header class="topbar">
     <div class="brand">
-      <svg class="logo" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="9" fill="#FFB547"/><path d="M8 24 L16 9 L25 24" fill="none" stroke="#0F1218" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/><circle cx="16" cy="9" r="3.2" fill="#0F1218"/></svg>
+      <svg class="logo" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="9" fill="#FFB547"/><path d="M8 24 L16 9 L25 24" fill="none" stroke="#0E0F0D" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/><circle cx="16" cy="9" r="3.2" fill="#0E0F0D"/></svg>
       <span class="brand-name">Fulcro</span>
     </div>
     <div class="top-actions">
@@ -223,6 +223,10 @@
       </div>
       <input id="restoreInput" class="sr-only" type="file" accept="application/json,.json">
       <p class="hint">I dati degli allenamenti stanno su questo telefono: scarica un backup ogni tanto, soprattutto prima di cambiare telefono.</p>
+
+      <h3>App</h3>
+      <button id="btnForceUpdate" class="btn btn-ghost" type="button">Forza aggiornamento dell'app</button>
+      <p class="hint" id="verLabel"></p>
 
       <h3>Coach AI (opzionale)</h3>
       <label class="field field-wide"><span>API Key Google Gemini</span><input id="setGemini" type="password" autocomplete="off" spellcheck="false" placeholder="AIza…"></label>
