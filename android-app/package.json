@@ -1,7 +1,7 @@
 {
   "name": "fulcro-android",
   "private": true,
-  "version": "3.4.0",
+  "version": "3.5.0",
   "description": "Guscio Android (Capacitor) di Fulcro: impacchetta i file web del repository in un APK.",
   "scripts": {
     "web": "bash build-web.sh"
