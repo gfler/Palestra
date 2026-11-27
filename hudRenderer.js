@@ -1,7 +1,7 @@
 // hudRenderer.js — disegna l'HUD tecnico sul <canvas> sovrapposto al <video>.
 // Nessuna ricodifica: ogni frame legge i dati già calcolati per video.currentTime.
 
-import { SIDE_IDX, PROFILES, PHASE_LABEL } from './biomechanics.js';
+import { SIDE_IDX, PROFILES, phaseLabel } from './biomechanics.js';
 
 export const COLORS = {
   torso: '#B79CFF',
@@ -283,7 +283,7 @@ export class HudRenderer {
     const rep = f.rep || 0;
     const ph = rep ? f.ph : 'TOP';
     const repTxt = total ? `Rep ${rep || '–'}/${total}` : 'Nessuna rep';
-    const phTxt = rep ? PHASE_LABEL[ph] : 'In attesa';
+    const phTxt = rep ? phaseLabel(a.meta.profile, ph) : 'In attesa';
     const time = rep ? `${f.pe.toFixed(1)} s` : '';
     const bh = 34 * s, bw = Math.min(w - 24 * s, 320 * s);
     const x = (w - bw) / 2, y = h - bh - 12 * s;

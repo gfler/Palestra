@@ -4,19 +4,13 @@ import { h, icon, openSheet, toast, fmtDay, fmtNum } from './dom.js';
 import { loadDb, getDb, dbError, resolve, search, imgUrl } from './exdb.js';
 import { exKey, exerciseHistory, records, est1RM, muscleIt, EQUIPMENT_IT, fmtKg, norm } from './training.js';
 import { getWorkouts, setLink } from './store.js';
+import { guessProfile } from './movements.js';
 
 let techHandler = () => {};
 export const onAnalyzeTechnique = (fn) => { techHandler = fn; };
 export const analyze = (o) => techHandler(o);
 
-/** Profilo biomeccanico suggerito dal nome. */
-export function guessProfile(name) {
-  const n = ` ${norm(name)} `;
-  if (/ (rdl|stacco|deadlift|romanian|good morning) /.test(n)) return 'rdl';
-  if (/ (squat|pressa|leg press|hack|affondi|lunge) /.test(n)) return 'squat';
-  if (/ (panca|bench|chest press|distensioni|push up|dip) /.test(n)) return 'bench';
-  return 'generic';
-}
+export { guessProfile };
 
 const photo = (ex, i = 0) => {
   if (!ex || !ex.im[i]) return null;

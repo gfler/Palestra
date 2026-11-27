@@ -680,3 +680,8 @@ body { background: radial-gradient(110% 38% at 50% -6%, rgba(255, 181, 71, 0.075
 .toasts { top: auto; bottom: calc(var(--tabh) + 14px); }
 body:has(.restbar:not([hidden])) .toasts { bottom: calc(var(--tabh) + 108px); }
 body[data-view="tech"] .toasts { bottom: calc(var(--tabh) + 100px); }
+
+/* scelta del tipo di analisi video */
+.mode-box { display: grid; gap: 8px; margin: 2px 0 6px; }
+.field select { width: 100%; min-height: 48px; padding: 0 12px; border-radius: 12px; border: 1px solid var(--line); background: var(--ink); color: var(--text); font: 600 16px var(--font-ui); }
+.field select:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; }

@@ -34,7 +34,7 @@ function buildTabbar() {
   }, icon(v.icon, 24), h('span', {}, v.label), k === 'train' ? h('i', { class: 'tab-dot', hidden: true }) : null)));
 }
 
-const APP_VERSION = '3.1';
+const APP_VERSION = '3.2';
 
 function bindSettings() {
   const ver = $('#verLabel');
@@ -80,9 +80,9 @@ function init() {
   buildTabbar();
   initTrain();
   setGoPrograms(() => goto('prog'));
-  onAnalyzeTechnique(({ name, kg }) => {
+  onAnalyzeTechnique(({ name, kg, fromProgram }) => {
     goto('tech');
-    if (window.fulcroTech) window.fulcroTech.prefill({ exercise: name, load: kg, profile: guessProfile(name) });
+    if (window.fulcroTech) window.fulcroTech.prefill({ exercise: name, load: kg, profile: guessProfile(name), fromProgram: !!fromProgram });
     toast('Scegli il video della serie: nome e carico sono già compilati.', 'info', 5000);
   });
   bindSettings();

@@ -63,7 +63,7 @@ export function adviceNode(e) {
     h('p', { class: 'advice-t' }, adv.headline),
     h('ul', { class: 'advice-r' }, adv.reasons.map((r) => h('li', {}, r))),
     pl.stalled ? h('div', { class: 'advice-stall' }, h('b', {}, `Fermo da ${pl.sessions} sedute`), ...pl.tips.map((t) => h('p', {}, t))) : null,
-    adv.tech ? null : h('button', { class: 'chip-btn', type: 'button', onclick: () => analyze({ name: e.name, kg: adv.kg || e.kg || null }) }, icon('lens', 16), ' Aggiungi un video per un consiglio più preciso'));
+    adv.tech ? null : h('button', { class: 'chip-btn', type: 'button', onclick: () => analyze({ name: e.name, kg: adv.kg || e.kg || null, fromProgram: true }) }, icon('lens', 16), ' Aggiungi un video per un consiglio più preciso'));
 }
 
 function advicePane(exs) {

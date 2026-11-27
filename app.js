@@ -4,6 +4,10 @@ import { analyze, compactReps, PROFILES } from './biomechanics.js';
 import { createPoseEngine } from './poseEngine.js';
 import { HudRenderer, LAYERS } from './hudRenderer.js';
 import * as sheets from './sheetsSync.js';
+import { MOVEMENT_ORDER, guessProfile } from './movements.js';
+import * as store from './store.js';
+import { exKey, exerciseHistory } from './training.js';
+import { pickExercise } from './exDetail.js';
 
 /* ------------------------------------------------------------------ */
 /* Utilità                                                              */
@@ -130,11 +134,101 @@ function renderSession() {
 /* Setup serie                                                          */
 /* ------------------------------------------------------------------ */
 
+const PROFILE_HINT = {
+  generic: 'Conta le ripetizioni e misura i tempi, senza giudicare la tecnica.',
+  lateral: 'Per le alzate inquadra da davanti o da dietro, con le braccia ben visibili.',
+  _default: 'Metti il telefono di lato (circa 90°) con tutto il corpo in inquadratura.',
+};
+
+const setupState = { mode: 'free', progName: '', day: '', profileTouched: false };
+
+function fillProfileSelect() {
+  const sel = $('#profile');
+  const opt = (k) => h('option', { value: k }, PROFILES[k].label);
+  sel.replaceChildren(
+    h('optgroup', { label: 'Base' }, ...['rdl', 'squat', 'bench'].map(opt)),
+    h('optgroup', { label: 'Altri movimenti' }, ...MOVEMENT_ORDER.map(opt)),
+    h('optgroup', { label: 'Qualsiasi altro' }, opt('generic')),
+  );
+}
+
+function showProfileHint() {
+  const k = $('#profile').value;
+  $('#profileHint').textContent = PROFILE_HINT[k] || PROFILE_HINT._default;
+}
+
+function setProfile(k, { touched = false } = {}) {
+  if (!PROFILES[k]) k = 'generic';
+  $('#profile').value = k;
+  if (touched) setupState.profileTouched = true;
+  showProfileHint();
+}
+
+/** Peso dell'ultima seduta per quell'esercizio (altrimenti il riferimento della scheda). */
+function lastKgFor(name, refKg) {
+  const hist = exerciseHistory(store.getWorkouts(), exKey(name));
+  const last = hist[hist.length - 1];
+  if (last) {
+    const ks = last.sets.map((x) => x.kg).filter((x) => x > 0);
+    if (ks.length) return Math.max(...ks);
+  }
+  return refKg > 0 ? refKg : 0;
+}
+
+function setMode(mode) {
+  setupState.mode = mode;
+  const el = $(`input[name="mode"][value="${mode}"]`); if (el) el.checked = true;
+  $('#modeFree').hidden = mode !== 'free';
+  $('#modeProg').hidden = mode !== 'prog';
+  if (mode === 'prog') fillProgDays();
+}
+
+function fillProgDays() {
+  const prog = store.activeProgram();
+  const daySel = $('#progDay'), exSel = $('#progEx');
+  if (!prog || !prog.days.length) {
+    daySel.replaceChildren(); exSel.replaceChildren();
+    $('#progHint').textContent = 'Non hai ancora una scheda in uso: creala dalla sezione Schede, oppure usa «Esercizio libero».';
+    return;
+  }
+  $('#progHint').textContent = `Scheda in uso: ${prog.name}. Il video resta collegato all'esercizio.`;
+  const keep = daySel.value;
+  daySel.replaceChildren(...prog.days.map((d, i) => h('option', { value: String(i) }, d.name)));
+  if (keep && daySel.querySelector(`option[value="${keep}"]`)) daySel.value = keep;
+  fillProgExercises();
+}
+
+function fillProgExercises() {
+  const prog = store.activeProgram();
+  const day = prog && prog.days[Number($('#progDay').value) || 0];
+  const exSel = $('#progEx');
+  if (!day) return;
+  exSel.replaceChildren(h('option', { value: '' }, 'Scegli…'), ...day.exercises.map((e, i) => h('option', { value: String(i) }, e.name)));
+}
+
+function pickProgExercise() {
+  const prog = store.activeProgram();
+  const day = prog && prog.days[Number($('#progDay').value) || 0];
+  const ex = day && day.exercises[Number($('#progEx').value)];
+  if (!ex) return;
+  setupState.progName = prog.name; setupState.day = day.name;
+  $('#exName').value = ex.name; state.nameTouched = true;
+  const kg = lastKgFor(ex.name, ex.refKg);
+  if (kg) $('#load').value = kg;
+  setupState.profileTouched = false;
+  setProfile(guessProfile(ex.name));
+  if (state.analysis) recomputeSoon(); else onMetaChange();
+}
+
 function readSetup() {
+  const profile = $('#profile').value || 'generic';
+  const prog = setupState.mode === 'prog' && setupState.day;
   return {
-    session: ($('input[name="session"]:checked') || {}).value || 'Day A',
-    profile: ($('input[name="profile"]:checked') || {}).value || 'rdl',
-    exercise: $('#exName').value.trim() || PROFILES[($('input[name="profile"]:checked') || {}).value || 'rdl'].defaultName,
+    mode: setupState.mode,
+    session: prog ? setupState.day : 'Libero',
+    programName: prog ? setupState.progName : '',
+    profile,
+    exercise: $('#exName').value.trim() || PROFILES[profile].defaultName,
     load: parseFloat(String($('#load').value).replace(',', '.')) || 0,
     notes: $('#notes').value.trim(),
   };
@@ -142,21 +236,40 @@ function readSetup() {
 
 function applySetup(s) {
   if (!s) return;
-  const set = (name, val) => { const el = $(`input[name="${name}"][value="${CSS.escape(String(val))}"]`); if (el) el.checked = true; };
-  set('session', s.session); set('profile', s.profile);
+  if (s.profile) setProfile(s.profile);
   if (s.exercise) { $('#exName').value = s.exercise; state.nameTouched = true; }
   if (s.load) $('#load').value = s.load;
   if (s.notes) $('#notes').value = s.notes;
 }
 
+fillProfileSelect();
+setProfile('rdl');
 $('#exName').addEventListener('input', () => { state.nameTouched = true; onMetaChange(); });
+$('#exName').addEventListener('change', () => {
+  if (!setupState.profileTouched) {
+    const g = guessProfile($('#exName').value);
+    if (g !== 'generic' || $('#profile').value === 'generic') { setProfile(g); if (state.analysis) recomputeSoon(); }
+  }
+});
 $('#load').addEventListener('input', onMetaChange);
 $('#notes').addEventListener('input', onMetaChange);
-$$('input[name="session"]').forEach((el) => el.addEventListener('change', onMetaChange));
-$$('input[name="profile"]').forEach((el) => el.addEventListener('change', () => {
-  if (!state.nameTouched) $('#exName').value = PROFILES[el.value].defaultName;
-  if (state.analysis) recomputeSoon(); else onMetaChange();
+$$('input[name="mode"]').forEach((el) => el.addEventListener('change', () => { setMode(el.value); if (el.value === 'free') { setupState.day = ''; setupState.progName = ''; } onMetaChange(); }));
+$('#progDay').addEventListener('change', fillProgExercises);
+$('#progEx').addEventListener('change', pickProgExercise);
+$('#btnPickEx').addEventListener('click', () => pickExercise({
+  query: $('#exName').value, onPick: (ex) => {
+    $('#exName').value = ex.n; state.nameTouched = true;
+    setupState.profileTouched = false;
+    setProfile(guessProfile(ex.n));
+    if (state.analysis) recomputeSoon(); else onMetaChange();
+  },
 }));
+$('#profile').addEventListener('change', () => {
+  setupState.profileTouched = true;
+  showProfileHint();
+  if (!state.nameTouched) $('#exName').value = PROFILES[$('#profile').value].defaultName;
+  if (state.analysis) recomputeSoon(); else onMetaChange();
+});
 
 /* ------------------------------------------------------------------ */
 /* Caricamento video                                                    */
@@ -351,7 +464,7 @@ const recomputeSoon = debounce(() => recompute(false), 250);
 function fillRecord(rec) {
   const a = state.analysis, s = a.summary, setup = readSetup();
   Object.assign(rec, {
-    session: setup.session, profile: setup.profile, exercise: setup.exercise, load: setup.load, notes: setup.notes,
+    session: setup.session, mode: setup.mode, programName: setup.programName, profile: setup.profile, exercise: setup.exercise, load: setup.load, notes: setup.notes,
     total: s.total, valid: s.valid, improve: s.improve,
     ecc: s.avgEcc, conc: s.avgConc, angMin: s.avgAngMin, dev: s.avgDev, loss: s.loss,
     rpe: s.rpeHint, verdict: s.verdict,
@@ -896,10 +1009,18 @@ $('#btnInstall').addEventListener('click', async () => {
 /* Avvio                                                                */
 /* ------------------------------------------------------------------ */
 
-$('#exName').value = PROFILES.rdl.defaultName;
 window.fulcroTech = {
-  prefill({ exercise, load, profile }) {
+  prefill({ exercise, load, profile, fromProgram }) {
     applySetup({ exercise, load: load || 0, profile });
+    setupState.profileTouched = false;
+    const prog = fromProgram ? store.activeProgram() : null;
+    const di = prog ? prog.days.findIndex((d) => d.exercises.some((e) => exKey(e.name) === exKey(exercise))) : -1;
+    if (di >= 0) {
+      setMode('prog');
+      $('#progDay').value = String(di); fillProgExercises();
+      $('#progEx').value = String(prog.days[di].exercises.findIndex((e) => exKey(e.name) === exKey(exercise)));
+      setupState.progName = prog.name; setupState.day = prog.days[di].name;
+    } else { setupState.day = ''; setupState.progName = ''; setMode('free'); }
     onMetaChange();
   },
 };

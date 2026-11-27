@@ -419,7 +419,7 @@ function exerciseCard(W, ex, ei) {
         store.saveActive(); rebuild();
       } }, icon('bolt', 16), ' Riscaldamento'),
       nextEx ? h('button', { class: `chip-btn${ex.link ? ' on' : ''}`, type: 'button', 'aria-pressed': String(!!ex.link), onclick: () => { ex.link = !ex.link; store.saveActive(); render(); } }, 'Superset') : null,
-      h('button', { class: 'chip-btn', type: 'button', onclick: () => analyze({ name: ex.name, kg: ex.sets.find((s) => s.kg)?.kg ?? null }) }, icon('lens', 16), ' Tecnica'),
+      h('button', { class: 'chip-btn', type: 'button', onclick: () => analyze({ name: ex.name, kg: ex.sets.find((s) => s.kg)?.kg ?? null, fromProgram: true }) }, icon('lens', 16), ' Tecnica'),
       rm),
     noteBox].filter(Boolean));
   refresh();

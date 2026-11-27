@@ -7,6 +7,8 @@
 //    così gli angoli non vengono deformati dai video non quadrati
 //  - "depth" è un segnale che vale ~0 in alto (TOP) e cresce verso il fondo (BOTTOM)
 
+import { MOVEMENTS, PHASE_LABEL_SWAP } from './movements.js';
+
 export const PHASES = ['TOP', 'ECCENTRIC', 'BOTTOM', 'CONCENTRIC'];
 export const PHASE_LABEL = { TOP: 'In alto', ECCENTRIC: 'Eccentrica', BOTTOM: 'Fondo', CONCENTRIC: 'Concentrica' };
 
@@ -51,6 +53,13 @@ export const PROFILES = {
     track: 'wr',
   },
 };
+
+for (const m of Object.values(MOVEMENTS)) {
+  PROFILES[m.key] = { key: m.key, label: m.label, defaultName: m.defaultName, angles: m.angles, minRange: m.minRange, track: m.track, cfg: m };
+}
+
+/** Etichetta della fase: nei movimenti in cui il "fondo" è la contrazione, eccentrica/concentrica si invertono. */
+export const phaseLabel = (profile, ph) => (PROFILES[profile]?.cfg?.swap ? PHASE_LABEL_SWAP[ph] : PHASE_LABEL[ph]);
 
 /* ------------------------------------------------------------------ */
 /* One Euro Filter                                                      */
@@ -185,7 +194,7 @@ function frameMetrics(smoothed, side, asp, facing) {
   const n = smoothed.length;
   const M = {
     hip: new Array(n).fill(NaN), knee: new Array(n).fill(NaN), elbow: new Array(n).fill(NaN),
-    lean: new Array(n).fill(NaN), trunkVert: new Array(n).fill(NaN), forearmVert: new Array(n).fill(NaN),
+    lean: new Array(n).fill(NaN), upArm: new Array(n).fill(NaN), shAng: new Array(n).fill(NaN), trunkVert: new Array(n).fill(NaN), forearmVert: new Array(n).fill(NaN),
     wrX: new Array(n).fill(NaN), wrY: new Array(n).fill(NaN), shX: new Array(n).fill(NaN), shY: new Array(n).fill(NaN),
     hipX: new Array(n).fill(NaN), hipY: new Array(n).fill(NaN), kneeY: new Array(n).fill(NaN),
     ankX: new Array(n).fill(NaN),
@@ -199,6 +208,8 @@ function frameMetrics(smoothed, side, asp, facing) {
     M.knee[i] = angle3(hp, kn, an);
     M.elbow[i] = angle3(sh, el, wr);
     M.trunkVert[i] = angleFromVertical(hp, sh);
+    M.upArm[i] = angleFromVertical(sh, el);
+    M.shAng[i] = angle3(hp, sh, el);
     // inclinazione con segno: positiva = busto in avanti rispetto al verso di sguardo
     M.lean[i] = (Math.atan2((sh.x - hp.x) * facing, hp.y - sh.y) * 180) / Math.PI;
     M.forearmVert[i] = angleFromVertical(el, wr);
@@ -226,7 +237,15 @@ function fillNaN(arr) {
 function depthSignal(profile, M, smoothed, win) {
   const n = smoothed.length;
   let d;
-  if (profile === 'rdl') d = M.hip.map((v) => 180 - v);
+  const cfg = PROFILES[profile] && PROFILES[profile].cfg;
+  if (cfg) {
+    const a = M[cfg.angle].slice();
+    fillNaN(a);
+    const seg = a.slice(win.i0, win.i1 + 1);
+    if (cfg.mode === 'flex') d = a.map((v) => 180 - v);
+    else if (cfg.mode === 'ext') { const base = percentile(seg, 5); d = a.map((v) => v - base); }
+    else { const start = median(seg.slice(0, Math.min(10, seg.length))); d = a.map((v) => Math.abs(v - start)); }
+  } else if (profile === 'rdl') d = M.hip.map((v) => 180 - v);
   else if (profile === 'squat') d = M.knee.map((v) => 180 - v);
   else if (profile === 'bench') d = M.elbow.map((v) => 180 - v);
   else {
@@ -326,8 +345,22 @@ function evaluateRep(profile, rep, M, fps, closureEnd) {
   const flags = [];
   const add = (code, msg) => flags.push({ code, msg });
   const m = {};
+  const cfg = PROFILES[profile] && PROFILES[profile].cfg;
 
-  if (profile === 'rdl') {
+  if (cfg) {
+    const c = {
+      M, fi0, fiMax, fi1, ce: closureEnd, torso, fps,
+      min: (a, i, j) => minOf(slice(a, i, j)), max: (a, i, j) => maxOf(slice(a, i, j)),
+      range: (a, i, j) => { const x = slice(a, i, j); return x.length ? maxOf(x) - minOf(x) : NaN; },
+    };
+    cfg.checks.forEach((k) => {
+      const v = k.metric(c);
+      m['c_' + k.code + '_' + cfg.checks.indexOf(k)] = v;
+      if (Number.isFinite(v) && !k.ok(v)) add(k.code, k.msg(v));
+    });
+    m.dev = (c.range(M.wrX, fi0, fi1) / torso) * 100;
+    m.angMin = c.min(M[cfg.angle], fi0, fi1);
+  } else if (profile === 'rdl') {
     m.hipMin = minOf(slice(M.hip, fi0, fi1));
     m.hipTop = maxOf(slice(M.hip, fiMax, closureEnd));
     m.kneeMin = minOf(slice(M.knee, fi0, fi1));
@@ -387,7 +420,8 @@ export function assessQuality(raw, smoothed, M, side, asp, profile, brightness) 
   const det = raw.filter(Boolean).length / total;
   if (det < 0.7) issues.push({ level: 'error', msg: `Persona rilevata solo nel ${Math.round(det * 100)}% dei frame: controlla inquadratura e luce.` });
   const I = SIDE_IDX[side];
-  const need = profile === 'bench' ? [I.sh, I.el, I.wr] : profile === 'generic' ? [I.sh, I.hip, I.wr] : [I.sh, I.hip, I.knee, I.ank];
+  const cfgQ = PROFILES[profile] && PROFILES[profile].cfg;
+  const need = cfgQ ? cfgQ.need.map((k) => I[k]) : profile === 'bench' ? [I.sh, I.el, I.wr] : profile === 'generic' ? [I.sh, I.hip, I.wr] : [I.sh, I.hip, I.knee, I.ank];
   let cut = 0, seen = 0;
   for (const f of raw) {
     if (!f) continue;
@@ -395,7 +429,7 @@ export function assessQuality(raw, smoothed, M, side, asp, profile, brightness) 
     if (need.some((k) => f[k][2] < 0.4 || f[k][0] < -0.02 || f[k][0] > 1.02 || f[k][1] < -0.02 || f[k][1] > 1.02)) cut++;
   }
   if (seen && cut / seen > 0.2) issues.push({ level: 'warn', msg: 'Il corpo esce dall\'inquadratura: allontana il telefono o inquadra tutto da testa a piedi.' });
-  if (profile !== 'generic') {
+  if (profile !== 'generic' && !(cfgQ && cfgQ.frontalOk)) {
     const widths = [];
     for (const s of smoothed) {
       if (!s.lm) continue;
@@ -418,7 +452,7 @@ const FLAG_SHORT = {
   hyperext: 'iperestensione in alto', knee_bend: 'ginocchia troppo flesse', knee_var: 'ginocchia instabili',
   path: 'traiettoria del peso da correggere', depth: 'profondità insufficiente', trunk: 'busto troppo inclinato',
   lockout: 'chiusura incompleta', elbow_rom: 'discesa incompleta', elbow_deep: 'gomito troppo chiuso',
-  forearm: 'avambraccio inclinato', rom_short: 'ROM ridotto', slow: 'rep molto più lenta',
+  forearm: 'avambraccio inclinato', arch: 'inarcamento della schiena', pull_short: 'trazione incompleta', stretch: 'allungamento incompleto', swing: 'slancio del busto', drift: 'gomito che si sposta', curl_short: 'curl non completo', raise_low: 'alzata troppo bassa', raise_high: 'alzata troppo alta', knee_pos: 'posizione dei piedi da rivedere', rom_short: 'ROM ridotto', slow: 'rep molto più lenta',
 };
 
 function rpeHint(loss) {
@@ -482,13 +516,21 @@ function summarize(profile, reps, M, fps) {
     row('Chiusura', `${fmt(eTop)}°`, '≥ 165°', eTop >= 165, eTop < 165 ? 'Chiudi completamente le braccia' : '');
     row('Avambraccio al fondo', `${fmt(fore)}° dalla verticale`, '≤ 12°', fore <= 12, fore > 12 ? 'Avambracci più verticali: rivedi la presa' : '');
     row('Traiettoria polso', `${fmt(pr)}% del busto`, 'J-curve 6–35%', pr >= 3 && pr <= 35, pr < 3 ? 'Traiettoria molto verticale' : '');
+  } else if (PROFILES[profile] && PROFILES[profile].cfg) {
+    PROFILES[profile].cfg.checks.forEach((k, idx) => {
+      const vals = reps.map((r) => r['c_' + k.code + '_' + idx]).filter(Number.isFinite);
+      const v = mean(vals);
+      const okAvg = Number.isFinite(v) && k.ok(v);
+      const unit = !k.unit ? '' : k.unit === '°' ? '°' : ` ${k.unit}`;
+      row(k.label, Number.isFinite(v) ? `${fmt(v)}${unit}` : '–', k.optimal, okAvg, okAvg ? '' : k.tip);
+    });
   } else {
     row('Escursione verticale', `${fmt(mean(roms))}% del busto`, '≥ 10%', mean(roms) >= 10, '');
     row('Spostamento orizzontale', `${fmt(avgDev)}% del busto`, 'basso', avgDev <= 25, '');
   }
   const romAvg = mean(roms);
   if (profile !== 'generic') {
-    const unit = profile === 'rdl' || profile === 'squat' || profile === 'bench' ? '°' : '%';
+    const unit = profile === 'generic' ? '%' : '°';
     row('ROM', `${fmt(romAvg)}${unit}`, 'costante', romCv <= 0.12, romCv > 0.12 ? 'Escursione variabile da rep a rep' : '');
   }
   row('Tempo ecc. / conc.', `${fmt(avgEcc, 1)} s / ${fmt(avgConc, 1)} s`, 'ecc 2–4 s · conc 0.6–2.5 s', eccOk && concOk, tempoNote);
@@ -508,6 +550,8 @@ function summarize(profile, reps, M, fps) {
     if (count('elbow_rom') + count('elbow_deep') === 0) good.push('buon range al petto');
     if (count('forearm') === 0) good.push('avambracci verticali');
     if (count('path') === 0) good.push('traiettoria stabile');
+  } else if (PROFILES[profile] && PROFILES[profile].cfg) {
+    PROFILES[profile].cfg.checks.forEach((k) => { if (count(k.code) === 0 && !good.includes(k.good)) good.push(k.good); });
   } else {
     if (count('rom_short') === 0) good.push('escursione costante');
   }
@@ -593,6 +637,8 @@ export function analyze(raw, opts) {
       if (r.tEnd - r.tStart > 2 * mDur) r.flags.push({ code: 'slow', msg: 'rep molto più lenta delle altre (possibile cedimento)' });
     });
   }
+  const cfgA = PROFILES[profile] && PROFILES[profile].cfg;
+  if (cfgA && cfgA.swap) reps.forEach((r) => { const t = r.ecc; r.ecc = r.conc; r.conc = t; });
   reps.forEach((r) => { r.valid = r.flags.length === 0; r.verdict = r.valid ? 'VALID' : 'NEEDS_IMPROVEMENT'; r.reason = r.flags.map((f) => f.msg).join('; '); });
 
   const summary = summarize(profile, reps, M, fps);
