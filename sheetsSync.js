@@ -470,3 +470,12 @@ export async function askGemini(apiKey, system, text) {
   if (!out) throw new Error('Risposta vuota da Gemini');
   return out;
 }
+
+/* ------------------------------ Dieta e corpo ------------------------------ */
+
+/** Riscrive per intero un foglio (usato per Dieta_Log e Dieta_Piano: poche righe, nessun duplicato). */
+export async function writeTab(tab, rows) {
+  if (!isConfigured()) throw Object.assign(new Error('Google Sheets non collegato'), { code: 'CONFIG' });
+  if (!navigator.onLine) throw Object.assign(new Error('Offline'), { code: 'OFFLINE' });
+  await pOverwrite(tab, rows);
+}

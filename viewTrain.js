@@ -11,6 +11,7 @@ import * as sheets from './sheetsSync.js';
 import * as C from './coach.js';
 import { scheduleRest, cancelRest, notifyRestDone, buzz, shareBlob } from './native.js';
 import { renderWorkoutImage } from './shareCard.js';
+import { openCheckin, applyCheckin } from './checkin.js';
 import { openCoach } from './viewCoach.js';
 import { resolve } from './exdb.js';
 
@@ -34,9 +35,9 @@ function ensureAudio() {
 }
 function beep() {
   if (!audio) return;
-  [0, 0.28].forEach((d) => {
+  [0, 0.22, 0.44].forEach((d, k) => {
     const o = audio.createOscillator(), g = audio.createGain();
-    o.type = 'sine'; o.frequency.value = 880;
+    o.type = 'sine'; o.frequency.value = k === 2 ? 1320 : 880;
     g.gain.setValueAtTime(0.0001, audio.currentTime + d);
     g.gain.exponentialRampToValueAtTime(0.25, audio.currentTime + d + 0.02);
     g.gain.exponentialRampToValueAtTime(0.0001, audio.currentTime + d + 0.22);
@@ -147,22 +148,24 @@ export function planExercise(pe, deload = false) {
     } else {
       kg = pe.refKg; reps = (pe.refReps && (pe.refReps[i] ?? pe.refReps.at(-1))) || null;
     }
-    return { type: 'normal', kg: deload ? C.deloadKg(kg) : kg, reps, rir: null, done: false, ts: null };
+    const hl = !!last && !deload && ((sug.kind === 'up') || (sug.kind === 'keep' && reps > (last.sets[i] || last.sets.at(-1)).reps));
+    return { type: 'normal', kg: deload ? C.deloadKg(kg) : kg, reps, rir: null, done: false, ts: null, hl };
   });
   return {
-    name: pe.name, dbId: pe.dbId || null, restSec: pe.restSec, note: '', target, link: !!pe.link,
+    name: pe.name, dbId: pe.dbId || null, restSec: pe.restSec, note: '', target, link: !!pe.link, progress: last && !deload ? sug.kind : null,
     hint: deload ? 'Scarico: una serie in meno e carico −10%. Resta lontano dal cedimento.' : (last ? sug.text : ''),
     refText: !last ? (pe.ref || pe.note || '') : '', sets,
   };
 }
 
-export function startWorkout(program, day, { deload = false } = {}) {
+export function startWorkout(program, day, { deload = false, checkin = null } = {}) {
   const W = {
     id: uid(), programId: program ? program.id : null, programName: program ? program.name : '',
     dayId: day ? day.id : null, dayName: day ? `${day.name}${deload ? ' (scarico)' : ''}` : 'Allenamento libero',
     startedAt: new Date().toISOString(), endedAt: null, note: '',
     exercises: day ? day.exercises.map((e) => planExercise(e, deload)) : [], prep: { warm: [], cool: [] },
   };
+  if (checkin) { W.checkin = checkin; applyCheckin(W, checkin); }
   store.setActive(W); store.saveActive();
   holdScreen();
   render();
@@ -176,7 +179,7 @@ export function startWorkout(program, day, { deload = false } = {}) {
 export function rowsFor(w) {
   const d = new Date(w.startedAt);
   const date = d.toLocaleDateString('sv-SE'), time = d.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' });
-  const TYPE = { normal: 'Normale', warmup: 'Riscaldamento', drop: 'Drop set', failure: 'Cedimento' };
+  const TYPE = { normal: 'Normale', warmup: 'Avvicinamento', drop: 'Drop set', failure: 'Cedimento' };
   const rows = [];
   for (const ex of w.exercises) {
     let n = 0;
@@ -246,7 +249,7 @@ function renderHome() {
       h('div', { class: 'card-head' }, h('h2', {}, prog.name), h('button', { class: 'link-btn', type: 'button', onclick: () => goProg() }, 'Gestisci')),
       prog.days.length ? h('div', { class: 'day-list' }, prog.days.map((d, i) => {
         const last = workouts.filter((w) => w.dayId === d.id).at(-1);
-        return h('button', { class: `day-btn${i === nextIdx ? ' next' : ''}`, type: 'button', onclick: () => startWorkout(prog, d, { deload: deloadOn() }) },
+        return h('button', { class: `day-btn${i === nextIdx ? ' next' : ''}`, type: 'button', onclick: async () => { const c = await openCheckin(d.name); if (c === false) return; startWorkout(prog, d, { deload: deloadOn(), checkin: c }); } },
           h('span', { class: 'day-t' }, i === nextIdx ? h('em', { class: 'next-tag' }, 'Prossimo') : null, h('b', {}, d.name), h('small', {}, i === nextIdx ? `${d.exercises.slice(0, 3).map((e) => e.name).join(' · ')}${d.exercises.length > 3 ? ` · +${d.exercises.length - 3}` : ''}` : `${d.exercises.length} esercizi${last ? ` · ultima volta ${fmtDay(last.startedAt)}` : ''}`)),
           icon('play', 22));
       })) : h('p', { class: 'muted' }, 'Questa scheda non ha ancora giorni: aggiungili da «Gestisci».'),
@@ -322,7 +325,7 @@ let elapsedId = null;
 
 function setLabel(ex, i) {
   const s = ex.sets[i];
-  if (s.type === 'warmup') return 'R';
+  if (s.type === 'warmup') return 'A';
   if (s.type === 'drop') return 'D';
   if (s.type === 'failure') return 'F';
   return String(ex.sets.slice(0, i + 1).filter((x) => x.type !== 'warmup').length);
@@ -408,7 +411,7 @@ function exerciseCard(W, ex, ei) {
   card.append(...[head,
     ex.link && nextEx ? h('p', { class: 'hint-ss' }, `Superset con «${nextEx.name}»: niente recupero fra i due.`) : null,
     C.plateau(exerciseHistory(store.getWorkouts(), exKey(ex.name))).stalled ? h('button', { class: 'chip-btn on', type: 'button', onclick: () => openCoach({ tab: 'adv', sel: 'active' }) }, 'Fermo da 4 sedute: idee') : null,
-    ex.hint ? h('p', { class: 'hint-amber' }, icon('bolt', 16), ' ', ex.hint) : null,
+    ex.hint ? h('p', { class: `hint-amber${ex.progress === 'up' ? ' hint-up' : ''}` }, icon(ex.progress === 'up' ? 'up' : 'bolt', 16), ' ', ex.hint) : null,
     ex.refText ? h('p', { class: 'hint-ref' }, `Dalla scheda: ${ex.refText}`) : null,
     lastLine ? h('p', { class: 'muted small' }, lastLine) : null,
     h('div', { class: 'set-head' }, h('span', {}, 'Serie'), h('span', {}, 'kg'), h('span', {}, 'Rep'), h('span', {}, 'RIR'), h('span', {}, '')),
@@ -438,7 +441,7 @@ function exerciseCard(W, ex, ei) {
 }
 
 function setRow(W, ex, ei, s, si, refresh, rebuild) {
-  const row = h('div', { class: `set-row${s.done ? ' done' : ''}`, dataset: { type: s.type } });
+  const row = h('div', { class: `set-row${s.done ? ' done' : ''}${s.hl && !s.done ? ' sug-up' : ''}`, dataset: { type: s.type } });
   const typeBtn = h('button', { class: 'set-n', type: 'button', 'aria-label': `Tipo serie ${si + 1}: tocca per cambiare`, onclick: () => {
     const order = ['normal', 'warmup', 'drop', 'failure'];
     s.type = order[(order.indexOf(s.type) + 1) % order.length]; store.saveActive(); rebuild();
@@ -513,7 +516,7 @@ function addExerciseSheet(W) {
  * Se non c'è un allenamento in corso lo avvia (dal giorno della scheda, se indicato).
  * @returns {{ setNo: number, started: boolean }}
  */
-export function logVideoSet({ name, kg, reps, valid, vel, profile, program = null, day = null }) {
+export function logVideoSet({ name, kg, reps, valid, vel, loss = null, profile, program = null, day = null }) {
   let started = false;
   if (!store.getActive()) {
     const W0 = {
@@ -534,7 +537,7 @@ export function logVideoSet({ name, kg, reps, valid, vel, profile, program = nul
   let si = ex.sets.findIndex((x) => !x.done && x.type !== 'warmup');
   if (si < 0) { ex.sets.push({ type: 'normal', kg: null, reps: null, rir: null, done: false, ts: null }); si = ex.sets.length - 1; }
   const set = ex.sets[si];
-  Object.assign(set, { kg: kg || 0, reps, done: true, ts: new Date().toISOString(), tech: { total: reps, valid, vel: Number.isFinite(vel) ? Math.round(vel * 100) / 100 : null, profile } });
+  Object.assign(set, { kg: kg || 0, reps, done: true, ts: new Date().toISOString(), tech: { total: reps, valid, vel: Number.isFinite(vel) ? Math.round(vel * 100) / 100 : null, loss: Number.isFinite(loss) ? Math.round(loss) : null, profile } });
   const next = ex.sets[si + 1];
   if (next && !next.done) { if (next.kg == null) next.kg = set.kg; if (next.reps == null) next.reps = reps; }
   store.saveActive();
@@ -617,9 +620,13 @@ export function initTrain() {
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible' && store.getActive()) { holdScreen(); tick(); }
   });
-  window.addEventListener('online', () => {
-    if (sheets.isConfigured() && sheets.getTrainQueue().length) pushToSheets({ interactive: false }).then((r) => { if (r.ok) { toast('Allenamenti inviati a Sheets ✓', 'ok'); if (!store.getActive()) render(); } });
-  });
+  const autoFlush = () => {
+    if (!navigator.onLine || !sheets.isConfigured() || !sheets.getTrainQueue().length) return;
+    pushToSheets({ interactive: false }).then((r) => { if (r.ok && r.n) { toast('Allenamenti in coda inviati a Sheets ✓', 'ok'); if (!store.getActive()) render(); } });
+  };
+  window.addEventListener('online', autoFlush);
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') autoFlush(); });
+  setTimeout(autoFlush, 2500);
 }
 
 export { parseRest };

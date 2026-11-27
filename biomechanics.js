@@ -643,14 +643,28 @@ export function analyze(raw, opts) {
 
   // Velocità media concentrica del punto tracciato (m/s). Scala: lunghezza della gamba ≈ 49,1% dell'altezza (Winter).
   const H = Number(opts.heightCm);
+  let calib = null;
   if (H > 120 && H < 230) {
-    const legLen = median(smoothed.map((s) => {
-      if (!s.lm) return NaN;
+    // Metro principale: gamba (anca→ginocchio→caviglia ≈ 49,1% dell'altezza).
+    // Se le gambe non si vedono (panca, macchine, cavi, palestra piena) si ripiega sul busto
+    // (spalla→anca ≈ 28,8%) e poi sul braccio (spalla→gomito ≈ 18,6%), da tabelle di Winter.
+    const vis = (lm, k) => (lm[I[k]].length > 2 ? lm[I[k]][2] : 1);
+    const segLen = (ks, minVis = 0.5) => median(smoothed.map((s) => {
+      if (!s.lm || ks.some((k) => vis(s.lm, k) < minVis)) return NaN;
       const p = (k) => ({ x: s.lm[I[k]][0] * aspect, y: s.lm[I[k]][1] });
-      const hp = p('hip'), kn = p('knee'), an = p('ank');
-      return Math.hypot(hp.x - kn.x, hp.y - kn.y) + Math.hypot(kn.x - an.x, kn.y - an.y);
-    }));
-    const mPerUnit = legLen > 0 ? (0.491 * H / 100) / legLen : NaN;
+      let d = 0;
+      for (let j = 1; j < ks.length; j++) { const a = p(ks[j - 1]), b = p(ks[j]); d += Math.hypot(a.x - b.x, a.y - b.y); }
+      return d;
+    }).filter(Number.isFinite));
+    const legSeen = smoothed.filter((s) => s.lm && vis(s.lm, 'knee') >= 0.5 && vis(s.lm, 'ank') >= 0.5).length / Math.max(1, smoothed.filter((s) => s.lm).length);
+    const cands = [
+      { by: 'gamba', frac: 0.491, len: legSeen >= 0.6 ? segLen(['hip', 'knee', 'ank']) : NaN },
+      { by: 'busto', frac: 0.288, len: segLen(['sh', 'hip']) },
+      { by: 'braccio', frac: 0.186, len: segLen(['sh', 'el']) },
+    ];
+    const ref = cands.find((c) => Number.isFinite(c.len) && c.len > 0.02);
+    const mPerUnit = ref ? (ref.frac * H / 100) / ref.len : NaN;
+    calib = ref ? ref.by : null;
     reps.forEach((r) => {
       const [c0, c1] = cfgA && cfgA.swap ? [r.fi0, r.fiMax] : [r.fiMax, r.fi1];
       let lo = Infinity, hi = -Infinity;
@@ -668,6 +682,7 @@ export function analyze(raw, opts) {
     summary.velMean = mean(vels); summary.velBest = best;
     summary.velLast = vels[vels.length - 1];
     summary.velLoss = vels.length >= 3 ? Math.max(0, ((best - summary.velLast) / best) * 100) : null;
+    summary.velCalib = calib;
   }
   // rep migliore (per il "fantasma"): valida con minor deviazione
   const pool = reps.filter((r) => r.valid);

@@ -5,6 +5,7 @@ import * as store from './store.js';
 import { initTrain, render as renderTrain, setGoPrograms } from './viewTrain.js';
 import { renderPrograms } from './viewPrograms.js';
 import { renderStats } from './viewStats.js';
+import { renderDiet, initDiet } from './viewDiet.js';
 import { onAnalyzeTechnique, guessProfile } from './exDetail.js';
 import { loadDb } from './exdb.js';
 import { saveTextFile, onBackButton, isNative } from './native.js';
@@ -12,6 +13,7 @@ import { saveTextFile, onBackButton, isNative } from './native.js';
 const VIEWS = {
   train: { label: 'Allenamento', icon: 'dumbbell', el: '#v-train', render: renderTrain },
   prog: { label: 'Schede', icon: 'list', el: '#v-prog', render: renderPrograms },
+  diet: { label: 'Dieta', icon: 'leaf', el: '#v-diet', render: renderDiet },
   stats: { label: 'Progressi', icon: 'chart', el: '#v-stats', render: renderStats },
   tech: { label: 'Tecnica', icon: 'lens', el: '#app', render: null },
 };
@@ -35,7 +37,7 @@ function buildTabbar() {
   }, icon(v.icon, 24), h('span', {}, v.label), k === 'train' ? h('i', { class: 'tab-dot', hidden: true }) : null)));
 }
 
-const APP_VERSION = '3.4';
+const APP_VERSION = '3.5';
 
 function bindSettings() {
   const ver = $('#verLabel');
@@ -79,6 +81,7 @@ function bindSettings() {
 function init() {
   buildTabbar();
   initTrain();
+  initDiet();
   setGoPrograms(() => goto('prog'));
   onAnalyzeTechnique(({ name, kg, fromProgram }) => {
     goto('tech');

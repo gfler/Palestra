@@ -37,6 +37,7 @@
 
   <main id="v-train" class="view" hidden></main>
   <main id="v-prog" class="view" hidden></main>
+  <main id="v-diet" class="view" hidden></main>
   <main id="v-stats" class="view" hidden></main>
 
   <main id="app" class="view" hidden>
@@ -225,6 +226,13 @@
       <div class="card" id="compareCard" hidden>
         <h2 id="compareTitle">Rispetto all'ultima volta</h2>
         <ul id="compareList" class="compare"></ul>
+      </div>
+
+      <div class="card" id="ghostCard" hidden>
+        <h2 id="ghostTitle">Confronto con 4 settimane fa</h2>
+        <p class="muted" id="ghostLede"></p>
+        <ul id="ghostList" class="compare"></ul>
+        <button type="button" class="btn btn-ghost" id="btnGhost">Mostra il fantasma sul video</button>
       </div>
 
       <div class="card" id="aiCard" hidden>

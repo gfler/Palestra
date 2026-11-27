@@ -14,7 +14,7 @@ function niceRange(min, max) {
 /**
  * Linea nel tempo. points: [{t (ms), v, caption}] ordinati; markers: [{t, label}] (cambi scheda).
  */
-export function lineChart(points, { unit = '', height = 190, markers = [], decimals = 1 } = {}) {
+export function lineChart(points, { unit = '', height = 190, markers = [], decimals = 1, overlay = null, dotsOnly = false } = {}) {
   const wrap = h('div', { class: 'chart' });
   const caption = h('div', { class: 'chart-cap', 'aria-live': 'polite' });
   if (!points.length) {
@@ -24,7 +24,8 @@ export function lineChart(points, { unit = '', height = 190, markers = [], decim
   const padL = 34, padR = 12, padT = 14, padB = 24, H = height;
   const t0 = points[0].t, t1 = points[points.length - 1].t;
   const span = Math.max(1, t1 - t0);
-  const [lo, hi] = niceRange(Math.min(...points.map((p) => p.v)), Math.max(...points.map((p) => p.v)));
+  const allV = points.map((p) => p.v).concat((overlay || []).map((p) => p.v).filter(Number.isFinite));
+  const [lo, hi] = niceRange(Math.min(...allV), Math.max(...allV));
   const X = (t) => (points.length === 1 ? (padL + (W - padR)) / 2 : padL + ((t - t0) / span) * (W - padL - padR));
   const Y = (v) => padT + (1 - (v - lo) / (hi - lo)) * (H - padT - padB);
 
@@ -45,9 +46,13 @@ export function lineChart(points, { unit = '', height = 190, markers = [], decim
   }
 
   const d = points.map((p, i) => `${i ? 'L' : 'M'}${X(p.t).toFixed(1)} ${Y(p.v).toFixed(1)}`).join(' ');
-  if (points.length > 1) {
+  if (points.length > 1 && !dotsOnly) {
     s.append(svg('path', { d: `${d} L${X(t1).toFixed(1)} ${H - padB} L${X(t0).toFixed(1)} ${H - padB} Z`, class: 'g-area' }));
     s.append(svg('path', { d, class: 'g-line' }));
+  }
+  if (overlay && overlay.length > 1) {
+    const o = overlay.filter((p) => Number.isFinite(p.v));
+    s.append(svg('path', { d: o.map((p, i) => `${i ? 'L' : 'M'}${X(p.t).toFixed(1)} ${Y(p.v).toFixed(1)}`).join(' '), class: 'g-line g-line2' }));
   }
   const dots = points.map((p) => svg('circle', { cx: X(p.t), cy: Y(p.v), r: 4, class: 'g-dot' }));
   s.append(...dots);

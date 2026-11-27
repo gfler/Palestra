@@ -48,6 +48,7 @@ const ICONS = {
   edit: 'm4 20 4-1 11-11-3-3L5 16l-1 4Z',
   copy: 'M9 9h10v11H9zM5 15V4h10',
   play: 'M8 5v14l11-7L8 5Z',
+  leaf: 'M5 19c0-8 5-14 15-14 0 10-6 15-14 15M5 19l7-7',
 };
 export function icon(name, size = 22) {
   return svg('svg', { viewBox: '0 0 24 24', width: size, height: size, class: 'ico', 'aria-hidden': 'true' }, svg('path', { d: ICONS[name] || ICONS.info }));

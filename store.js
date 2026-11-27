@@ -50,7 +50,8 @@ function cleanSet(s) {
     type: SET_TYPES.includes(s.type) ? s.type : 'normal',
     kg: nnum(s.kg, 0, 2000, null), reps: nnum(s.reps, 0, 1000, null), rir: nnum(s.rir, 0, 10, null),
     done: !!s.done, ts: str(s.ts, 40) || null,
-    tech: s.tech && typeof s.tech === 'object' ? { total: nnum(s.tech.total, 0, 500, 0), valid: nnum(s.tech.valid, 0, 500, 0), vel: nnum(s.tech.vel, 0, 5, null), profile: str(s.tech.profile, 20) } : null,
+    tech: s.tech && typeof s.tech === 'object' ? { total: nnum(s.tech.total, 0, 500, 0), valid: nnum(s.tech.valid, 0, 500, 0), vel: nnum(s.tech.vel, 0, 5, null), loss: nnum(s.tech.loss, 0, 100, null), profile: str(s.tech.profile, 20) } : null,
+    hl: !!s.hl,
   };
 }
 export function cleanWorkout(w) {
@@ -61,7 +62,7 @@ export function cleanWorkout(w) {
     const t = (e && e.target) || {};
     return {
       name, dbId: str(e.dbId, 100) || null, restSec: Math.round(nnum(e.restSec, 0, 1800, 120)), note: str(e.note, 300),
-      hint: str(e.hint, 300), refText: str(e.refText, 300), link: !!e.link,
+      hint: str(e.hint, 400), refText: str(e.refText, 300), link: !!e.link, progress: str(e.progress, 10) || null,
       target: { sets: Math.round(nnum(t.sets, 1, 20, 3)), repMin: nnum(t.repMin, 1, 200, 8), repMax: nnum(t.repMax, 1, 200, 12), rir: str(t.rir, 6) },
       sets: (Array.isArray(e.sets) ? e.sets : []).slice(0, 40).map(cleanSet).filter(Boolean),
     };
@@ -74,6 +75,7 @@ export function cleanWorkout(w) {
   const pr = w.prep && typeof w.prep === 'object' ? w.prep : {};
   const idx = (a) => (Array.isArray(a) ? a.slice(0, 30).map((x) => Math.round(Number(x))).filter((x) => Number.isInteger(x) && x >= 0 && x < 30) : []);
   out.prep = { warm: idx(pr.warm), cool: idx(pr.cool) };
+  if (w.checkin && typeof w.checkin === 'object') out.checkin = { energy: str(w.checkin.energy, 10), sleep: str(w.checkin.sleep, 10), pain: str(w.checkin.pain, 20) };
   const r = w.rest;
   if (r && typeof r === 'object' && Number.isFinite(+r.endsAt)) out.rest = { endsAt: +r.endsAt, total: nnum(r.total, 1, 3600, 60), label: str(r.label, 80) };
   return out;

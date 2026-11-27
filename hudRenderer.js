@@ -109,6 +109,7 @@ export class HudRenderer {
 
     if (this.layers.guide) this._guide(P(I.ank), P(I.foot), s);
     if (this.layers.ghost) this._ghost(a, f, s, w, h);
+    if (this.pastGhost && this.drawPast) this.drawPast(this.ctx, a, i, w, h, this.pastGhost, s);
     if (this.layers.trail) this._trail(a, i, s, w, h);
     if (this.layers.segments) this._segments(P, I, s);
     if (this.layers.angles) this._angles(a, P, I, f, s);

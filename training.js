@@ -197,8 +197,20 @@ export function suggest(target, last, inc = 2.5) {
   const rirLogged = at.map((s) => s.rir).filter((v) => Number.isFinite(v));
   const tooHard = rirMin != null && rirLogged.length && rirLogged.every((v) => v < Math.max(0, rirMin - 1));
 
+  // criteri oggettivi dal video (se le serie sono state filmate): ≥ 90% rep corrette e perdita di velocità ≤ 25%
+  const filmed = at.filter((s) => s.tech && s.tech.total > 0);
+  const techRatio = filmed.length ? filmed.reduce((a, s) => a + s.tech.valid, 0) / filmed.reduce((a, s) => a + s.tech.total, 0) : null;
+  const losses = filmed.map((s) => s.tech.loss).filter((v) => Number.isFinite(v));
+  const maxLoss = losses.length ? Math.max(...losses) : null;
+  const techOk = (techRatio == null || techRatio >= 0.9) && (maxLoss == null || maxLoss <= 25);
+
   if (enough && reps.every((r) => r >= target.repMax) && !tooHard) {
-    return { kind: 'up', kg: modal + inc, text: `Tutte le serie al massimo: prova ${fmtKg(modal + inc)} kg.` };
+    if (!techOk) {
+      const why = techRatio != null && techRatio < 0.9 ? `rep corrette ${Math.round(techRatio * 100)}%` : `perdita di velocità ${Math.round(maxLoss)}%`;
+      return { kind: 'keep', kg: modal, reps: reps.map(() => target.repMax), text: `Rep al tetto ma ${why}: resta a ${fmtKg(modal)} kg e consolida la tecnica.` };
+    }
+    const proof = filmed.length ? ` (video: ${Math.round(techRatio * 100)}% corrette${maxLoss != null ? `, −${Math.round(maxLoss)}% velocità` : ''})` : '';
+    return { kind: 'up', kg: modal + inc, text: `Tutte le serie al massimo${proof}: prova ${fmtKg(modal + inc)} kg.` };
   }
   const avg = reps.reduce((a, b) => a + b, 0) / reps.length;
   if (avg < target.repMin - 0.01 || (tooHard && avg < target.repMin + 1)) {

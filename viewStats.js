@@ -8,6 +8,10 @@ import { loadDb, getDb, resolve } from './exdb.js';
 import { openWorkoutDetail } from './viewTrain.js';
 import { icon } from './dom.js';
 import { plateau } from './coach.js';
+import * as diet from './diet.js';
+import { buildWeekSummary, stalledExercises } from './aiSummary.js';
+import { copyText } from './sheetsSync.js';
+import { toast } from './dom.js';
 
 const root = () => $('#v-stats');
 const DAY = 86400000;
@@ -42,6 +46,19 @@ export function renderStats() {
   const workouts = store.getWorkouts();
   const nodes = [h('section', { class: 'hero' }, h('h1', { class: 'headline' }, 'Progressi'),
     h('p', { class: 'lede' }, 'Ogni esercizio ha la sua storia, anche se cambi scheda: i numeri si sommano nel tempo.'))];
+
+  nodes.push(h('button', { class: 'btn btn-primary ai-btn', type: 'button', onclick: async () => {
+    const ok = await copyText(buildWeekSummary());
+    toast(ok ? 'Riepilogo della settimana copiato: incollalo in chat ✓' : 'Copia non riuscita', ok ? 'ok' : 'error', 5000);
+  } }, 'Copia riepilogo AI della settimana'));
+  const body = bodyCard();
+  if (body) nodes.push(body);
+  const stalled = stalledExercises(workouts);
+  if (stalled.length) {
+    nodes.push(h('section', { class: 'card stall-card' }, h('h2', {}, 'In stallo da 3 sedute'),
+      h('p', { class: 'muted' }, 'Nessun miglioramento in rep valide, velocità media o 1RM stimato: candidati da sostituire al prossimo cambio blocco.'),
+      h('ul', { class: 'hist-list' }, stalled.map((x) => h('li', {}, h('span', {}, x.name), h('span', { class: 'muted' }, `dal ${fmtDay(x.since)}`), h('button', { class: 'link-btn', type: 'button', onclick: () => { selKey = x.key; renderStats(); } }, 'Vedi'))))));
+  }
 
   if (!workouts.length) {
     nodes.push(h('section', { class: 'card empty' }, h('h2', {}, 'Ancora niente da mostrare'), h('p', { class: 'muted' }, 'Dopo il primo allenamento completato compaiono qui frequenza, volume e andamento di ogni esercizio.')));
@@ -212,6 +229,30 @@ function calendarCard(workouts) {
       h('span', { class: 'wo-n' }, `${fmtNum(workoutVolume(w))} kg`))) });
   }
   card.append(h('h2', {}, 'Calendario'), body, h('p', { class: 'hint' }, 'Tocca un giorno allenato per rivedere la seduta. Più il pallino è pieno, più volume hai fatto.'));
+  paint();
+  return card;
+}
+
+/* ------------------------------ corpo: peso con media mobile 7 gg, vita, passi ------------------------------ */
+
+let bodyMetric = 'weight';
+function bodyCard() {
+  const series = diet.bodySeries();
+  if (!series.length) return null;
+  const card = h('section', { class: 'card' });
+  const B = { weight: ['Peso', 'kg'], waist: ['Vita', 'cm'], steps: ['Passi', ''] };
+  const paint = () => {
+    const pts = series.filter((r) => Number.isFinite(r[bodyMetric])).map((r) => ({ t: diet.fromIso(r.date).getTime(), v: r[bodyMetric], caption: `${fmtDay(diet.fromIso(r.date))} · ${fmtNum(r[bodyMetric], bodyMetric === 'steps' ? 0 : 1)} ${B[bodyMetric][1]}` }));
+    const ma = diet.movingAvg(series, bodyMetric);
+    const overlay = series.map((r, i) => ({ t: diet.fromIso(r.date).getTime(), v: ma[i] })).filter((p) => Number.isFinite(p.v));
+    const lastMa = overlay.at(-1);
+    card.replaceChildren(
+      h('div', { class: 'card-head' }, h('h2', {}, 'Corpo'),
+        h('div', { class: 'chips-wrap' }, Object.entries(B).map(([k, [t]]) => h('button', { type: 'button', class: `chip-btn${k === bodyMetric ? ' on' : ''}`, onclick: () => { bodyMetric = k; paint(); } }, t)))),
+      lastMa ? h('p', { class: 'lede' }, `Media 7 giorni: ${fmtNum(lastMa.v, bodyMetric === 'steps' ? 0 : 1)} ${B[bodyMetric][1]}`) : null,
+      lineChart(pts, { unit: B[bodyMetric][1], decimals: bodyMetric === 'steps' ? 0 : 1, overlay, dotsOnly: true }),
+      h('p', { class: 'hint' }, 'Punti = misure del giorno; linea = media mobile a 7 giorni, che filtra le oscillazioni d\'acqua. Si inserisce dalla scheda Dieta.'));
+  };
   paint();
   return card;
 }

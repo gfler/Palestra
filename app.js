@@ -12,6 +12,7 @@ import { isNative, saveTextFile, shareBlob } from './native.js';
 import { logVideoSet } from './viewTrain.js';
 import { openRecorder } from './recorder.js';
 import { renderSetImage } from './shareCard.js';
+import { buildTrace, saveTrace, findGhost, compareRows, drawGhost } from './ghost.js';
 
 /* ------------------------------------------------------------------ */
 /* Utilità                                                              */
@@ -514,6 +515,8 @@ function recompute(isNew = false) {
     fps: m.fps, aspect: m.width / m.height, profile: setup.profile, brightness: m.brightness, window: win, heightCm: getHeight(),
   });
   hud.setAnalysis(state.analysis);
+  if (isNew) { state.traceId = null; hud.pastGhost = null; }
+  storeTraceSoon();
   buildRecord(isNew);
   renderReport();
   renderTicks();
@@ -625,6 +628,7 @@ function renderReport() {
 
   renderFatigue();
   renderCompare();
+  renderGhost();
   renderVelocity();
   const lb = $('#btnLogSet');
   lb.hidden = !s.total;
@@ -818,7 +822,7 @@ $('#btnLogSet').addEventListener('click', () => {
   const st = readSetup();
   const prog = setupState.mode === 'prog' ? store.activeProgram() : null;
   const day = prog ? prog.days.find((d) => d.name === setupState.day) : null;
-  const res = logVideoSet({ name: st.exercise, kg: st.load, reps: a.summary.total, valid: a.summary.valid, vel: a.summary.velMean, profile: a.meta.profile, program: prog, day });
+  const res = logVideoSet({ name: st.exercise, kg: st.load, reps: a.summary.total, valid: a.summary.valid, vel: a.summary.velMean, loss: a.summary.velLoss, profile: a.meta.profile, program: prog, day });
   const msg = `${res.started ? 'Allenamento avviato · ' : ''}Serie ${res.setNo} di ${st.exercise}: ${st.load || 0} kg × ${a.summary.total} ✓`;
   toast(msg, 'ok', 5000);
   state.loggedFor = a;
@@ -896,6 +900,44 @@ function findPrevious(rec) {
     .filter((x) => x.id !== rec.id && x.exercise.trim().toLowerCase() === key && String(x.ts) < String(rec.ts))
     .sort((a, b) => String(b.ts).localeCompare(String(a.ts)))[0] || null;
 }
+
+/* ------------------------------------------------------------------ */
+/* Confronto «fantasma» con ~4 settimane fa                             */
+/* ------------------------------------------------------------------ */
+
+hud.drawPast = drawGhost;
+const storeTraceSoon = debounce(async () => {
+  const a = state.analysis;
+  if (!a) return;
+  const st = readSetup();
+  const id = await saveTrace(buildTrace(a, { exercise: st.exercise, load: st.load }), state.traceId);
+  if (id) state.traceId = id;
+}, 600);
+
+async function renderGhost() {
+  const card = $('#ghostCard');
+  const a = state.analysis;
+  const st = readSetup();
+  const g = a && a.summary.total ? await findGhost(st.exercise, st.load, state.traceId) : null;
+  if (a !== state.analysis) return;
+  state.ghost = g;
+  if (!g) { card.hidden = true; hud.pastGhost = null; return; }
+  const { rows, sameLoad } = compareRows(a, g, st.load);
+  const d = new Date(g.date);
+  const days = Math.round((Date.now() - d.getTime()) / 86400000);
+  $('#ghostTitle').textContent = `Confronto con ${d.toLocaleDateString('it-IT', { day: 'numeric', month: 'long' })} (${days} giorni fa)`;
+  $('#ghostLede').textContent = `${g.name}${g.load ? `, ${String(g.load).replace('.', ',')} kg` : ''}${sameLoad ? ' — stesso carico: la velocità è confrontabile.' : ' — carico diverso: guarda soprattutto profondità e traiettoria.'}`;
+  $('#ghostList').replaceChildren(...rows.map((r) => h('li', {}, r.label, h('span', { class: 'delta', dataset: { tone: r.tone } }, r.text))));
+  const b = $('#btnGhost');
+  b.textContent = hud.pastGhost ? 'Nascondi il fantasma' : 'Mostra il fantasma sul video';
+  card.hidden = false;
+}
+$('#btnGhost').addEventListener('click', () => {
+  hud.pastGhost = hud.pastGhost ? null : state.ghost;
+  $('#btnGhost').textContent = hud.pastGhost ? 'Nascondi il fantasma' : 'Mostra il fantasma sul video';
+  hud.draw();
+  if (hud.pastGhost) { $('#stage') ? $('#stage').scrollIntoView({ behavior: 'smooth', block: 'center' }) : null; toast('Scheletro azzurro = la tua rep migliore di allora, allineata su anca e busto', 'ok', 5000); }
+});
 
 function renderCompare() {
   const card = $('#compareCard');
@@ -1313,9 +1355,17 @@ $('#btnConnect').addEventListener('click', async () => {
 
 $('#btnCopyScript').addEventListener('click', async () => {
   try {
-    const code = await (await fetch('apps-script/Code.gs', { cache: 'no-cache' })).text();
+    let code = await (await fetch('apps-script/Code.gs', { cache: 'no-cache' })).text();
+    // la chiave segreta va già dentro lo script: niente modifiche nell'editor di Google
+    let key = $('#setScriptKey').value.trim();
+    if (!key || key === 'cambiami') {
+      key = `fulcro-${Math.random().toString(36).slice(2, 8)}${Math.random().toString(36).slice(2, 6)}`;
+      $('#setScriptKey').value = key;
+      sheets.saveSettings(readSettingsForm());
+    }
+    code = code.replace("const CHIAVE = 'cambiami';", `const CHIAVE = '${key.replace(/['\\]/g, '')}';`);
     const ok = await sheets.copyText(code);
-    $('#connectMsg').textContent = ok ? 'Script copiato ✓ Ora incollalo in Estensioni → Apps Script del tuo foglio.' : 'Copia non riuscita: apri il file apps-script/Code.gs dal repository.';
+    $('#connectMsg').textContent = ok ? `Script copiato con la tua chiave già dentro (${key}) ✓ Incollalo in Estensioni → Apps Script e pubblicalo.` : 'Copia non riuscita: apri il file apps-script/Code.gs dal repository.';
   } catch { $('#connectMsg').textContent = 'Script non raggiungibile offline: apri apps-script/Code.gs dal repository.'; }
 });
 
