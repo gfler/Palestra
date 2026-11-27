@@ -9,6 +9,8 @@ import { openExercise, pickExercise, analyze } from './exDetail.js';
 import { thumb } from './exDetail.js';
 import * as sheets from './sheetsSync.js';
 import * as C from './coach.js';
+import { scheduleRest, cancelRest, notifyRestDone, buzz, shareBlob } from './native.js';
+import { renderWorkoutImage } from './shareCard.js';
 import { openCoach } from './viewCoach.js';
 import { resolve } from './exdb.js';
 
@@ -76,17 +78,19 @@ function startRest(sec, label) {
   W.rest = { endsAt: Date.now() + sec * 1000, total: sec, label };
   store.saveActive();
   firedFor = 0;
+  scheduleRest(W.rest.endsAt, label);
   runTick();
 }
 function adjustRest(delta) {
   const W = store.getActive();
   if (!W || !W.rest) return;
   W.rest.endsAt += delta * 1000; W.rest.total = Math.max(1, W.rest.total + delta); firedFor = 0;
-  store.saveActive(); runTick();
+  store.saveActive(); scheduleRest(W.rest.endsAt, W.rest.label); runTick();
 }
 function stopRest() {
   const W = store.getActive();
   if (W) { delete W.rest; store.saveActive(); }
+  cancelRest();
   runTick();
 }
 function runTick() {
@@ -115,7 +119,8 @@ function tick() {
   if (firedFor !== W.rest.endsAt) {
     firedFor = W.rest.endsAt;
     beep();
-    try { navigator.vibrate && navigator.vibrate([220, 90, 220]); } catch { /* non supportato */ }
+    buzz([220, 90, 220]);
+    notifyRestDone(W.rest.label);
   }
   if (left < -8) { delete W.rest; store.saveActive(); bar.hidden = true; clearInterval(tickId); }
 }
@@ -289,6 +294,12 @@ function renderHome() {
 
 export function openWorkoutDetail(w) {
   const del = h('button', { class: 'btn btn-ghost danger', type: 'button' }, 'Elimina allenamento');
+  const img = h('button', { class: 'btn btn-primary', type: 'button', onclick: async () => {
+    try {
+      const blob = await renderWorkoutImage(w, { volume: workoutVolume(w), durationText: w.endedAt ? fmtDuration((new Date(w.endedAt) - new Date(w.startedAt)) / 1000) : '' });
+      await shareBlob(`fulcro_${w.startedAt.slice(0, 10)}.png`, blob, 'Il mio allenamento su Fulcro');
+    } catch (e) { toast(`Immagine non creata: ${e.message}`, 'error'); }
+  } }, 'Condividi immagine');
   const sheet = openSheet({
     title: `${w.dayName} · ${fmtDay(w.startedAt)}`,
     content: [
@@ -297,7 +308,7 @@ export function openWorkoutDetail(w) {
         h('div', { class: 'detail-sets' }, e.sets.map((s) => h('span', { class: `set-chip${s.type !== 'normal' ? ' t-' + s.type : ''}` }, `${fmtKg(s.kg)}×${s.reps ?? '–'}${Number.isFinite(s.rir) ? ` @${s.rir}` : ''}`))),
         e.note ? h('p', { class: 'muted' }, e.note) : null)),
     ],
-    foot: del,
+    foot: h('div', { class: 'btn-col' }, img, del),
   });
   confirmTap(del, 'Tocca di nuovo per eliminare', () => { store.deleteWorkout(w.id); sheet.close(); toast('Allenamento eliminato'); });
 }
@@ -460,7 +471,9 @@ function setRow(W, ex, ei, s, si, refresh, rebuild) {
       rebuild();
     } else { s.done = false; store.saveActive(); rebuild(); }
   } }, icon('check', 22));
+  if (s.tech) row.classList.add('from-video');
   row.append(typeBtn, kg, reps, rir, ok);
+  if (s.tech) row.append(h('span', { class: 'set-video', title: 'Registrata dal video' }, icon('lens', 12), ` Video: ${s.tech.valid}/${s.tech.total} buone${s.tech.vel ? ` · ${String(s.tech.vel).replace('.', ',')} m/s` : ''}`));
   return row;
 }
 
@@ -489,6 +502,46 @@ function addExerciseSheet(W) {
       h('button', { class: 'btn btn-primary', type: 'button', onclick: () => add(name.value) }, 'Aggiungi'),
       h('button', { class: 'btn btn-ghost', type: 'button', onclick: () => { sheet.close(); pickExercise({ query: name.value, onPick: (ex) => add(ex.n, ex.id) }); } }, icon('search', 20), ' Cerca nella libreria')],
   });
+}
+
+/* ------------------------------------------------------------------ */
+/* Serie registrata dal video (Tecnica → Allenamento)                   */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Segna come fatta la prossima serie dell'esercizio nell'allenamento in corso, con kg e rep contate dal video.
+ * Se non c'è un allenamento in corso lo avvia (dal giorno della scheda, se indicato).
+ * @returns {{ setNo: number, started: boolean }}
+ */
+export function logVideoSet({ name, kg, reps, valid, vel, profile, program = null, day = null }) {
+  let started = false;
+  if (!store.getActive()) {
+    const W0 = {
+      id: uid(), programId: program ? program.id : null, programName: program ? program.name : '',
+      dayId: day ? day.id : null, dayName: day ? day.name : 'Allenamento libero',
+      startedAt: new Date().toISOString(), endedAt: null, note: '',
+      exercises: day ? day.exercises.map((e) => planExercise(e)) : [], prep: { warm: [], cool: [] },
+    };
+    store.setActive(W0); started = true;
+  }
+  const W = store.getActive();
+  let ei = W.exercises.findIndex((e) => exKey(e.name) === exKey(name));
+  if (ei < 0) {
+    W.exercises.push(planExercise({ name, dbId: null, sets: 0, repMin: reps || 8, repMax: reps || 8, rir: '', restSec: 120, ref: '', refKg: kg, refReps: null }));
+    ei = W.exercises.length - 1;
+  }
+  const ex = W.exercises[ei];
+  let si = ex.sets.findIndex((x) => !x.done && x.type !== 'warmup');
+  if (si < 0) { ex.sets.push({ type: 'normal', kg: null, reps: null, rir: null, done: false, ts: null }); si = ex.sets.length - 1; }
+  const set = ex.sets[si];
+  Object.assign(set, { kg: kg || 0, reps, done: true, ts: new Date().toISOString(), tech: { total: reps, valid, vel: Number.isFinite(vel) ? Math.round(vel * 100) / 100 : null, profile } });
+  const next = ex.sets[si + 1];
+  if (next && !next.done) { if (next.kg == null) next.kg = set.kg; if (next.reps == null) next.reps = reps; }
+  store.saveActive();
+  if (ex.restSec && ex.sets.some((x) => !x.done)) startRest(ex.restSec, ex.name);
+  holdScreen();
+  render();
+  return { setNo: ex.sets.slice(0, si + 1).filter((x) => x.type !== 'warmup').length, started };
 }
 
 /* ------------------------------------------------------------------ */

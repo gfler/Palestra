@@ -10,15 +10,14 @@ Il video resta sul telefono: viene analizzato in locale con MediaPipe. A Google 
 
 La prima apertura richiede la rete (scarica MediaPipe e il modello di posa, ~10 MB). Poi tutto è in cache e l'app funziona offline.
 
-## Collegare Google Sheets (una volta sola)
-1. Crea un Foglio Google vuoto e copia l'URL completo dalla barra degli indirizzi.
-2. Vai su Google Cloud Console → crea un progetto → «API e servizi» → abilita **Google Sheets API**.
-3. «Schermata di consenso OAuth»: tipo Esterno, aggiungi la tua email come utente di test.
-4. «Credenziali» → Crea credenziali → **ID client OAuth** → tipo *Applicazione web*.
-5. In «Origini JavaScript autorizzate» aggiungi l'origine mostrata nelle impostazioni dell'app (es. `https://<utente>.github.io`). Nessun URI di reindirizzamento.
-6. In Fulcro: ⚙ Impostazioni → incolla Client ID e URL del foglio → **Connetti Google Sheets**.
+## Collegare Google Sheets (una volta sola) — metodo Apps Script
+Non serve Google Cloud né login, e il collegamento non scade mai (funziona anche nell'APK).
+1. Apri il tuo Foglio Google → **Estensioni → Apps Script**. Cancella tutto e incolla `apps-script/Code.gs` (in Fulcro: ⚙ → «Copia lo script per il foglio»).
+2. Cambia `cambiami` con una parola segreta tua e salva.
+3. **Esegui il deployment → Nuovo deployment → App web**. Esegui come: *Me*. Chi ha accesso: *Chiunque*. Autorizza (Avanzate → Vai al progetto → Consenti).
+4. Copia l'URL che finisce con `/exec`. In Fulcro: ⚙ → incolla URL e parola segreta → **Prova collegamento**.
 
-Al primo invio l'app crea il tab `Log_Allenamenti` (se manca) e scrive l'intestazione. Il token Google dura circa un'ora e non viene salvato: se scade, tocca il badge in alto per riconnettere.
+Il metodo vecchio (OAuth con Client ID, token di un'ora) è ancora disponibile nel riquadro «Metodo vecchio» ma solo nel browser.
 
 ## Colonne del foglio
 `Data | Ora | Scheda | Esercizio | Carico_kg | Rep_Totali | Rep_Valide | Tempo_Ecc_Medio_s | Tempo_Conc_Medio_s | Angolo_Min_Medio | Deviazione_Traiettoria | Verdetto_Tecnico | Note` + **Perdita_Velocita_Pct** (14ª colonna, stima di fatica).
@@ -47,7 +46,7 @@ Con l'opzione attiva viene creato anche il tab `Riepilogo_Settimanale` (serie, r
 - La chiave Gemini e il Client ID restano in `localStorage` su questo dispositivo: usa una chiave con limiti di quota e non condividere il telefono sbloccato.
 
 ## Struttura
-`index.html` · `styles.css` · `app.js` · `poseEngine.js` · `biomechanics.js` · `hudRenderer.js` · `sheetsSync.js` · `manifest.json` · `sw.js` · `icons/`
+`index.html` · `styles.css` · `app.js` · `native.js` · `poseEngine.js` · `biomechanics.js` · `hudRenderer.js` · `sheetsSync.js` · `manifest.json` · `sw.js` · `icons/`
 
 ## Novità v2 — Allenamento
 
@@ -61,3 +60,30 @@ Aggiornamento: sostituisci nella radice del repository tutti i file (anche i nuo
 
 ## Novità v3
 Calendario mensile (Progressi), Coach (riscaldamento, defaticamento, consigli di carico che tengono conto di rep, RIR e video; domande libere con Gemini), serie di riscaldamento automatiche, superset, rilevamento dei plateau e settimana di scarico. File nuovi: `coach.js`, `viewCoach.js`.
+
+## Novità v3.3
+- **Tipo di movimento ben visibile** in cima alla scheda della serie, con **Automatico** come predefinito (prima era fisso su RDL).
+- **Riconoscimento automatico** dal video: squat, RDL, stacco, panca, hip thrust, pressa, leg extension/curl, press spalle, lat machine, rematore, curl, tricipiti, alzate. Nel report compare «Riconosciuto: …» con i pulsanti per correggerlo; se scegli tu un esercizio e il video sembra un altro, Fulcro ti avvisa e rianalizza con un tocco (senza rifare la pre-analisi).
+- Nomi dalla scheda: «Sumo squat» ora è squat (prima diventava stacco).
+- **Google Sheets via Apps Script**: niente più disconnessioni.
+- **App Android (APK)**.
+
+## Novità v3.4
+- **Tecnica a due pagine.** *Prova libera*: scegli prima il movimento (15 schede con icona) e Fulcro si calibra su quello. *Dalla mia scheda*: scegli giorno ed esercizio; per ogni esercizio puoi fissare "Analizza come…" (es. Pressa 45° → Pressa), e Fulcro se lo ricorda.
+- **Registra dall'app**: fotocamera posteriore, sagoma per inquadrarti di lato, conto alla rovescia 3/5/10 s, cambio camera.
+- **Segna la serie**: dopo l'analisi, un tocco mette kg e rep nella prossima serie dell'allenamento (lo avvia se serve) e parte il recupero. La serie mostra "Video: x/y buone · v m/s".
+- **Velocità del bilanciere** in m/s per rep, perdita di velocità e **1RM stimato** (squat e panca). Serve la tua altezza (Impostazioni o direttamente nella scheda). È una stima da video 2D, non un encoder.
+- **Timer di recupero** con notifica e vibrazione anche a schermo spento (nell'APK con notifiche native).
+- **HUD essenziale/completo** e **immagini da condividere** (serie analizzata e allenamento completo, 1080×1350).
+
+## App Android (APK)
+Il repository contiene `android-app/` (progetto Capacitor) e `.github/workflows/android-apk.yml`.
+A ogni push su `main` GitHub costruisce l'APK (circa 5–8 minuti, scheda **Actions**) e lo pubblica nelle **Releases**.
+Link fisso da aprire sul telefono:
+`https://github.com/<utente>/<repo>/releases/latest/download/Fulcro.apk`
+
+- Prima installazione: Android chiede di consentire «installa app sconosciute» al browser.
+- Aggiornamenti: scarica di nuovo dallo stesso link e installa sopra; i dati restano.
+- Nell'APK MediaPipe e il modello di posa sono inclusi: l'analisi funziona anche senza rete.
+- I dati dell'APK sono separati da quelli della versione web: per portarli, ⚙ → «Scarica backup» nel browser e «Ripristina da backup» nell'app.
+- Firma: `android-app/fulcro-release.jks` (password `fulcro-apk`), fissa per permettere gli aggiornamenti. Il repository è pubblico, quindi la chiave è visibile: per un uso personale va bene; se vuoi una chiave privata, crea i secret `KEYSTORE_BASE64` e `KEYSTORE_PASSWORD` (alias `fulcro`) e il workflow userà quella. Cambiare chiave richiede di disinstallare l'app una volta.

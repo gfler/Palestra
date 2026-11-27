@@ -1,0 +1,15 @@
+{
+  "appId": "com.gfler.fulcro",
+  "appName": "Fulcro",
+  "webDir": "www",
+  "android": {
+    "backgroundColor": "#0E0F0D"
+  },
+  "plugins": {
+    "SystemBars": {
+      "insetsHandling": "css",
+      "initialViewportFitValueHint": "cover",
+      "style": "DARK"
+    }
+  }
+}

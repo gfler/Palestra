@@ -1,0 +1,97 @@
+# Costruisce l'APK Android di Fulcro a ogni aggiornamento del repository.
+# Download dal telefono: https://github.com/<utente>/<repo>/releases/latest/download/Fulcro.apk
+name: APK Android
+
+on:
+  push:
+    branches: [main]
+    paths-ignore: ['**.md']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: apk
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: android-app
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: android-app/package-lock.json
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+          cache: gradle
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Dipendenze
+        run: npm ci
+
+      - name: File web + MediaPipe offline
+        run: bash build-web.sh
+
+      - name: Progetto Android
+        run: |
+          npx cap add android
+          cp -r res-overlay/. android/app/src/main/res/
+          # Fotocamera e microfono per «Registra ora», notifiche e vibrazione per il timer di recupero
+          M=android/app/src/main/AndroidManifest.xml
+          for perm in CAMERA RECORD_AUDIO VIBRATE POST_NOTIFICATIONS SCHEDULE_EXACT_ALARM; do
+            grep -q "permission.$perm\"" "$M" || sed -i "s#</manifest>#    <uses-permission android:name=\"android.permission.$perm\" />\n</manifest>#" "$M"
+          done
+          grep -q 'android.hardware.camera' "$M" || sed -i 's#</manifest>#    <uses-feature android:name="android.hardware.camera" android:required="false" />\n</manifest>#' "$M"
+          grep -n "uses-" "$M"
+          VERSION="$(node -p "require('./package.json').version.split('.').slice(0,2).join('.')").${{ github.run_number }}"
+          sed -i "s/versionCode 1$/versionCode ${{ github.run_number }}/; s/versionName \"1.0\"/versionName \"$VERSION\"/" android/app/build.gradle
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          npx cap sync android
+
+      - name: Compila
+        working-directory: android-app/android
+        run: ./gradlew --no-daemon assembleRelease
+
+      - name: Firma
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+        run: |
+          KS=fulcro-release.jks; PASS=fulcro-apk
+          if [ -n "${KEYSTORE_BASE64:-}" ]; then echo "$KEYSTORE_BASE64" | base64 -d > custom.jks; KS=custom.jks; PASS="$KEYSTORE_PASSWORD"; fi
+          BT="$ANDROID_HOME/build-tools/$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -1)"
+          IN=android/app/build/outputs/apk/release/app-release-unsigned.apk
+          "$BT/zipalign" -f -p 4 "$IN" aligned.apk
+          "$BT/apksigner" sign --ks "$KS" --ks-pass "pass:$PASS" --key-pass "pass:$PASS" --ks-key-alias fulcro --out Fulcro.apk aligned.apk
+          "$BT/apksigner" verify Fulcro.apk
+          ls -lh Fulcro.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Fulcro-${{ env.VERSION }}
+          path: android-app/Fulcro.apk
+
+      - name: Pubblica la release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: apk-${{ env.VERSION }}
+          name: Fulcro ${{ env.VERSION }} (Android)
+          body: |
+            APK di Fulcro ${{ env.VERSION }}.
+            Dal telefono: scarica **Fulcro.apk** qui sotto e aprilo (consenti «installa app sconosciute» al browser la prima volta).
+            Gli aggiornamenti si installano sopra la versione precedente senza perdere i dati.
+          files: android-app/Fulcro.apk
+          make_latest: true

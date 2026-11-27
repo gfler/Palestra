@@ -196,7 +196,7 @@ function frameMetrics(smoothed, side, asp, facing) {
     hip: new Array(n).fill(NaN), knee: new Array(n).fill(NaN), elbow: new Array(n).fill(NaN),
     lean: new Array(n).fill(NaN), upArm: new Array(n).fill(NaN), shAng: new Array(n).fill(NaN), trunkVert: new Array(n).fill(NaN), forearmVert: new Array(n).fill(NaN),
     wrX: new Array(n).fill(NaN), wrY: new Array(n).fill(NaN), shX: new Array(n).fill(NaN), shY: new Array(n).fill(NaN),
-    hipX: new Array(n).fill(NaN), hipY: new Array(n).fill(NaN), kneeY: new Array(n).fill(NaN),
+    hipX: new Array(n).fill(NaN), hipY: new Array(n).fill(NaN), kneeY: new Array(n).fill(NaN), elY: new Array(n).fill(NaN),
     ankX: new Array(n).fill(NaN),
   };
   for (let i = 0; i < n; i++) {
@@ -214,7 +214,7 @@ function frameMetrics(smoothed, side, asp, facing) {
     M.lean[i] = (Math.atan2((sh.x - hp.x) * facing, hp.y - sh.y) * 180) / Math.PI;
     M.forearmVert[i] = angleFromVertical(el, wr);
     M.wrX[i] = wr.x; M.wrY[i] = wr.y; M.shX[i] = sh.x; M.shY[i] = sh.y;
-    M.hipX[i] = hp.x; M.hipY[i] = hp.y; M.kneeY[i] = kn.y;
+    M.hipX[i] = hp.x; M.hipY[i] = hp.y; M.kneeY[i] = kn.y; M.elY[i] = el.y;
     M.ankX[i] = (an.x + ft.x) / 2; // mesopiede
   }
   M.torso = median(smoothed.map((s, i) => (s.lm ? Math.hypot(M.shX[i] - M.hipX[i], M.shY[i] - M.hipY[i]) : NaN)));
@@ -641,7 +641,34 @@ export function analyze(raw, opts) {
   if (cfgA && cfgA.swap) reps.forEach((r) => { const t = r.ecc; r.ecc = r.conc; r.conc = t; });
   reps.forEach((r) => { r.valid = r.flags.length === 0; r.verdict = r.valid ? 'VALID' : 'NEEDS_IMPROVEMENT'; r.reason = r.flags.map((f) => f.msg).join('; '); });
 
+  // Velocità media concentrica del punto tracciato (m/s). Scala: lunghezza della gamba ≈ 49,1% dell'altezza (Winter).
+  const H = Number(opts.heightCm);
+  if (H > 120 && H < 230) {
+    const legLen = median(smoothed.map((s) => {
+      if (!s.lm) return NaN;
+      const p = (k) => ({ x: s.lm[I[k]][0] * aspect, y: s.lm[I[k]][1] });
+      const hp = p('hip'), kn = p('knee'), an = p('ank');
+      return Math.hypot(hp.x - kn.x, hp.y - kn.y) + Math.hypot(kn.x - an.x, kn.y - an.y);
+    }));
+    const mPerUnit = legLen > 0 ? (0.491 * H / 100) / legLen : NaN;
+    reps.forEach((r) => {
+      const [c0, c1] = cfgA && cfgA.swap ? [r.fi0, r.fiMax] : [r.fiMax, r.fi1];
+      let lo = Infinity, hi = -Infinity;
+      for (let i = c0; i <= c1; i++) { const lm = smoothed[i].lm; if (!lm) continue; const y = lm[trackIdx][1]; if (y < lo) lo = y; if (y > hi) hi = y; }
+      const t = (c1 - c0) / fps;
+      const v = t > 0.15 && Number.isFinite(mPerUnit) ? ((hi - lo) * mPerUnit) / t : NaN;
+      r.vel = v > 0.03 && v < 3 ? v : NaN;
+    });
+  }
+
   const summary = summarize(profile, reps, M, fps);
+  const vels = reps.map((r) => r.vel).filter(Number.isFinite);
+  if (vels.length) {
+    const best = Math.max(...vels.slice(0, 3));
+    summary.velMean = mean(vels); summary.velBest = best;
+    summary.velLast = vels[vels.length - 1];
+    summary.velLoss = vels.length >= 3 ? Math.max(0, ((best - summary.velLast) / best) * 100) : null;
+  }
   // rep migliore (per il "fantasma"): valida con minor deviazione
   const pool = reps.filter((r) => r.valid);
   const cand = (pool.length ? pool : reps).slice().sort((a, b) => a.dev - b.dev)[0];
@@ -670,6 +697,102 @@ export function analyze(raw, opts) {
     frames, reps, summary, quality,
     signal: { lo, hi: sm.hi, R },
   };
+}
+
+/* ------------------------------------------------------------------ */
+/* Riconoscimento automatico del movimento                              */
+/* ------------------------------------------------------------------ */
+
+const AUTO_LABEL = {
+  squat: 'Squat', rdl: 'Stacco rumeno (RDL)', deadlift: 'Stacco da terra', bench: 'Panca',
+  hip_ext: 'Hip thrust', knee_press: 'Pressa', knee_iso: 'Leg extension / curl', press_v: 'Press spalle',
+  pull_v: 'Lat machine / trazioni', pull_h: 'Rematore', curl: 'Curl', triceps: 'Tricipiti', lateral: 'Alzate', generic: 'Generico',
+};
+export const autoLabel = (k) => AUTO_LABEL[k] || (PROFILES[k] && PROFILES[k].label) || k;
+
+/**
+ * Riconosce il tipo di movimento dalla posa (vista laterale, 2D).
+ * Regole semplici e spiegabili su escursioni articolari, orientamento del busto e posizione del polso.
+ * Restituisce { profile, confidence: 'alta'|'media'|'bassa', alternatives: [profili], why }.
+ */
+export function classifyMovement(raw, opts = {}) {
+  const { fps = 30, aspect = 9 / 16 } = opts;
+  const n = raw.length;
+  const fallback = (why) => ({ profile: 'generic', confidence: 'bassa', alternatives: ['squat', 'rdl', 'bench'], why });
+  if (!n) return fallback('video vuoto');
+  const win = { i0: Math.max(0, opts.window?.i0 ?? 0), i1: Math.min(n - 1, opts.window?.i1 ?? n - 1) };
+  const okFrames = raw.slice(win.i0, win.i1 + 1).filter(Boolean).length;
+  if (okFrames < 15 || okFrames / (win.i1 - win.i0 + 1) < 0.3) return fallback('persona rilevata in pochi frame');
+
+  const { side } = detectSide(raw);
+  const smoothed = smoothLandmarks(raw, fps);
+  const facing = detectFacing(smoothed, side, aspect);
+  const M = frameMetrics(smoothed, side, aspect, facing);
+  const seg = (a) => a.slice(win.i0, win.i1 + 1).filter(Number.isFinite);
+  const rng = (a) => { const s = seg(a); return s.length ? percentile(s, 95) - percentile(s, 5) : 0; };
+  const p = (a, q) => percentile(seg(a), q);
+
+  const Rk = rng(M.knee), Rh = rng(M.hip), Re = rng(M.elbow), Rs = rng(M.shAng);
+  const trunk = p(M.trunkVert, 50);
+  const lean = p(M.lean, 50);
+  const kneeMin = p(M.knee, 5), hipMax = p(M.hip, 95);
+  const lower = Math.max(Rk, Rh), upper = Math.max(Re, Rs);
+  const wrUp = (() => { let a = 0, t = 0; for (let i = win.i0; i <= win.i1; i++) { if (!Number.isFinite(M.wrY[i])) continue; t++; if (M.wrY[i] < M.shY[i]) a++; } return t ? a / t : 0; })();
+  const t = M.torso || 1;
+  const wrXr = rng(M.wrX) / t, wrYr = rng(M.wrY) / t;
+  const feat = { Rk: Math.round(Rk), Rh: Math.round(Rh), Re: Math.round(Re), Rs: Math.round(Rs), trunk: Math.round(trunk), kneeMin: Math.round(kneeMin), wrUp: Math.round(wrUp * 100) };
+  const out = (profile, confidence, alternatives, why) => ({ profile, confidence, alternatives, why, feat });
+
+  if (lower < 18 && upper < 22) return fallback('movimento troppo piccolo per capire l\'esercizio');
+
+  // Busto quasi orizzontale per tutta la serie: sdraiato (panca, hip thrust, leg curl)
+  if (trunk > 58) {
+    if (Rh >= 25 && Rh > Re && Rh >= Rk * 0.8) return out('hip_ext', Rh > 35 ? 'media' : 'bassa', ['bench', 'generic'], 'busto orizzontale e anca che si estende');
+    if (Re >= 30 && Re >= lower) return out('bench', Re > 50 ? 'alta' : 'media', ['hip_ext', 'generic'], 'busto orizzontale e gomito che lavora');
+    if (Rk >= 30) return out('knee_iso', 'bassa', ['knee_press', 'generic'], 'sdraiato, lavora il ginocchio');
+    return fallback('sdraiato ma movimento poco chiaro');
+  }
+
+  // Arti inferiori dominanti
+  if (lower >= 25 && lower >= upper * 0.8) {
+    if (Rh < 15 && Rk >= 35) return out('knee_iso', 'media', ['knee_press'], 'seduto, si muove solo il ginocchio');
+    if (hipMax < 140 && Rk >= 35 && trunk > 25) return out('knee_press', 'media', ['squat'], 'anca sempre flessa: pressa o simile');
+    const ratio = Rk / Math.max(1, Rh);
+    if (ratio >= 0.75 || (ratio >= 0.6 && kneeMin < 100)) {
+      return out('squat', ratio >= 0.85 && kneeMin < 115 ? 'alta' : 'media', ['knee_press', 'deadlift'], `ginocchio e anca piegano insieme (ginocchio fino a ${Math.round(kneeMin)}°)`);
+    }
+    if (ratio >= 0.35) return out('deadlift', 'media', ['squat', 'rdl'], 'molta anca, ginocchio a metà: stacco');
+    return out('rdl', ratio < 0.25 && Rh >= 35 ? 'alta' : 'media', ['deadlift', 'squat'], 'piega soprattutto l\'anca a ginocchia quasi ferme');
+  }
+
+  // Arti superiori dominanti
+  if (upper >= 25) {
+    if (wrUp > 0.3 && Re >= 30) {
+      // stesso gesto, verso opposto: la lat machine parte a braccia distese, il press parte con il gomito piegato
+      const startElbow = median(seg(M.elbow).slice(0, Math.max(5, Math.round(fps * 0.5))));
+      if (startElbow > 140 && wrUp > 0.7) return out('pull_v', 'bassa', ['press_v'], 'parte a braccia distese sopra la testa e tira giù');
+      return out('press_v', 'bassa', ['pull_v'], 'spinta sopra la testa');
+    }
+    if (Rs > Re * 1.2 && Rs >= 30) return out('lateral', 'media', ['press_v'], 'braccio che si alza a gomito fermo');
+    if (lean > 30 || (wrXr > wrYr * 1.3 && Re >= 30)) return out('pull_h', 'media', ['curl'], 'tirata orizzontale verso il busto');
+    const elMinIdx = (() => { let bi = -1, bv = Infinity; for (let i = win.i0; i <= win.i1; i++) if (M.elbow[i] < bv) { bv = M.elbow[i]; bi = i; } return bi; })();
+    const wristAboveElbow = elMinIdx >= 0 && M.wrY[elMinIdx] < M.elY[elMinIdx];
+    if (wristAboveElbow && p(M.elbow, 5) < 80) return out('curl', 'media', ['triceps'], 'gomito che flette con il peso verso la spalla');
+    return out('triceps', 'bassa', ['curl'], 'gomito che si estende verso il basso');
+  }
+  return fallback('movimento poco chiaro');
+}
+
+/**
+ * %1RM stimata dalla velocità media concentrica (equazioni di popolazione):
+ * panca — González-Badillo & Sánchez-Medina 2010; squat — Sánchez-Medina et al. 2017. Solo indicativa.
+ */
+export function pct1RMFromVelocity(profile, v) {
+  if (!Number.isFinite(v)) return null;
+  let p = null;
+  if (profile === 'bench') p = 8.4326 * v * v - 73.501 * v + 112.33;
+  else if (profile === 'squat') p = -5.961 * v * v - 50.71 * v + 117;
+  return p == null ? null : Math.max(30, Math.min(100, p));
 }
 
 /** Versione senza frame né path, adatta a JSON compatti (Gemini, log, export). */

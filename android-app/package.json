@@ -1,0 +1,21 @@
+{
+  "name": "fulcro-android",
+  "private": true,
+  "version": "3.4.0",
+  "description": "Guscio Android (Capacitor) di Fulcro: impacchetta i file web del repository in un APK.",
+  "scripts": {
+    "web": "bash build-web.sh"
+  },
+  "dependencies": {
+    "@capacitor/android": "8.6.3",
+    "@capacitor/app": "8.1.2",
+    "@capacitor/core": "8.6.3",
+    "@capacitor/filesystem": "8.1.5",
+    "@capacitor/haptics": "8.0.2",
+    "@capacitor/local-notifications": "8.3.1",
+    "@capacitor/share": "8.0.3"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "8.6.3"
+  }
+}

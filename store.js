@@ -50,6 +50,7 @@ function cleanSet(s) {
     type: SET_TYPES.includes(s.type) ? s.type : 'normal',
     kg: nnum(s.kg, 0, 2000, null), reps: nnum(s.reps, 0, 1000, null), rir: nnum(s.rir, 0, 10, null),
     done: !!s.done, ts: str(s.ts, 40) || null,
+    tech: s.tech && typeof s.tech === 'object' ? { total: nnum(s.tech.total, 0, 500, 0), valid: nnum(s.tech.valid, 0, 500, 0), vel: nnum(s.tech.vel, 0, 5, null), profile: str(s.tech.profile, 20) } : null,
   };
 }
 export function cleanWorkout(w) {

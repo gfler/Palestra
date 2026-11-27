@@ -1,10 +1,10 @@
 // sw.js — cache offline dell'app (shell) e dei file pesanti di MediaPipe (WASM + modello).
-const VERSION = 'v4';
+const VERSION = 'v6';
 const SHELL_CACHE = `fulcro-shell-${VERSION}`;
 const RUNTIME_CACHE = `fulcro-runtime-${VERSION}`;
 const SHELL = [
   './', 'index.html', 'styles.css', 'app.js', 'biomechanics.js', 'movements.js', 'poseEngine.js', 'hudRenderer.js',
-  'sheetsSync.js', 'training.js', 'dom.js', 'store.js', 'exdb.js', 'charts.js', 'exDetail.js', 'viewTrain.js', 'viewPrograms.js', 'viewStats.js', 'viewCoach.js', 'coach.js', 'nav.js', 'manifest.json', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png',
+  'sheetsSync.js', 'training.js', 'dom.js', 'store.js', 'exdb.js', 'charts.js', 'exDetail.js', 'viewTrain.js', 'viewPrograms.js', 'viewStats.js', 'viewCoach.js', 'coach.js', 'nav.js', 'native.js', 'recorder.js', 'shareCard.js', 'apps-script/Code.gs', 'manifest.json', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png',
 ];
 // Solo risorse statiche: mai le API di Google (Sheets, Gemini, login), che devono passare sempre dalla rete.
 const CDN_HOSTS = ['cdn.jsdelivr.net', 'fonts.googleapis.com', 'fonts.gstatic.com', 'raw.githubusercontent.com'];

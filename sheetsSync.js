@@ -1,5 +1,6 @@
-// sheetsSync.js — Google Identity Services (OAuth client-side) + Google Sheets API v4.
-// Nessun server: il token vive solo in memoria, il resto sta in localStorage.
+// sheetsSync.js — collegamento a Google Sheets con due metodi:
+//  1. «Apps Script» (consigliato): un piccolo script nel foglio riceve le righe. Nessun login, non scade mai, funziona anche nell'APK.
+//  2. OAuth (Google Identity Services + Sheets API v4): il token dura ~1 ora e va rinnovato.
 
 const SCOPE = 'https://www.googleapis.com/auth/spreadsheets';
 const API = 'https://sheets.googleapis.com/v4/spreadsheets';
@@ -24,7 +25,12 @@ const KEYS = {
   weekly: 'fulcro.weekly',
   gemini: 'fulcro.geminiKey',
   queue: 'fulcro.queue',
+  scriptUrl: 'fulcro.scriptUrl',
+  scriptKey: 'fulcro.scriptKey',
 };
+
+/** Nell'APK (Capacitor) il login Google in WebView è bloccato: si usa solo Apps Script. */
+export const isNativeApp = () => !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
 
 function lsGet(key, def) {
   try { const v = localStorage.getItem(key); return v === null ? def : JSON.parse(v); } catch { return def; }
@@ -40,8 +46,13 @@ export function getSettings() {
     autoSync: lsGet(KEYS.autoSync, false),
     weekly: lsGet(KEYS.weekly, true),
     geminiKey: lsGet(KEYS.gemini, ''),
+    scriptUrl: lsGet(KEYS.scriptUrl, ''),
+    scriptKey: lsGet(KEYS.scriptKey, ''),
   };
 }
+
+const useScript = () => { const s = getSettings(); return !!s.scriptUrl || isNativeApp(); };
+export const method = () => (useScript() ? 'script' : 'oauth');
 
 export function saveSettings(s) {
   lsSet(KEYS.clientId, (s.clientId || '').trim());
@@ -49,6 +60,8 @@ export function saveSettings(s) {
   lsSet(KEYS.autoSync, !!s.autoSync);
   lsSet(KEYS.weekly, !!s.weekly);
   lsSet(KEYS.gemini, (s.geminiKey || '').trim());
+  if (s.scriptUrl !== undefined) lsSet(KEYS.scriptUrl, (s.scriptUrl || '').trim());
+  if (s.scriptKey !== undefined) lsSet(KEYS.scriptKey, (s.scriptKey || '').trim());
   ready = false; // le impostazioni possono cambiare foglio
 }
 
@@ -63,7 +76,7 @@ let token = null;
 let tokenExp = 0;
 let ready = false;
 
-export const isConnected = () => !!token && Date.now() < tokenExp;
+export const isConnected = () => (useScript() ? !!getSettings().scriptUrl : !!token && Date.now() < tokenExp);
 
 function waitForGis(timeoutMs = 6000) {
   return new Promise((resolve, reject) => {
@@ -79,6 +92,7 @@ function waitForGis(timeoutMs = 6000) {
 
 /** Richiede il token OAuth. `interactive:false` tenta solo il rinnovo silenzioso. */
 export async function connect({ interactive = true } = {}) {
+  if (useScript()) { await scall({ op: 'ping' }); return 'script'; }
   const { clientId } = getSettings();
   if (!clientId) throw new Error('Inserisci il Client ID OAuth nelle impostazioni.');
   await waitForGis();
@@ -135,7 +149,29 @@ function sheetId() {
   return id;
 }
 
-/* ------------------------------ setup foglio ------------------------------ */
+/* ------------------------------ Apps Script ------------------------------ */
+
+const SCRIPT_RE = /^https:\/\/script\.google(usercontent)?\.com\/.+/;
+export const isScriptUrl = (u) => SCRIPT_RE.test(String(u || '').trim());
+
+async function scall(payload) {
+  const { scriptUrl, scriptKey } = getSettings();
+  if (!isScriptUrl(scriptUrl)) throw Object.assign(new Error('Incolla l\'URL dell\'app web di Apps Script nelle impostazioni.'), { code: 'CONFIG' });
+  let res;
+  try {
+    // text/plain evita la richiesta preliminare CORS, che Apps Script non gestisce
+    res = await fetch(scriptUrl, { method: 'POST', redirect: 'follow', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ key: scriptKey, ...payload }) });
+  } catch {
+    throw Object.assign(new Error('Rete non disponibile'), { code: 'OFFLINE' });
+  }
+  let j = null;
+  try { j = await res.json(); } catch { /* risposta HTML: script non pubblicato come app web per «Chiunque» */ }
+  if (!j) throw Object.assign(new Error('Lo script non risponde: ripubblicalo come App web con accesso «Chiunque».'), { code: 'ACCESS' });
+  if (!j.ok) throw Object.assign(new Error(j.error || 'Errore dello script'), { code: /chiave/i.test(j.error || '') ? 'KEY' : 'API' });
+  return j;
+}
+
+/* ------------------------------ primitive (uguali per i due metodi) ------------------------------ */
 
 async function ensureTab(id, title) {
   const meta = await gfetch(`${API}/${id}?fields=sheets.properties.title`);
@@ -145,17 +181,47 @@ async function ensureTab(id, title) {
   }
 }
 
+/** Crea il tab se manca e scrive l'intestazione se la prima riga è vuota. */
+async function pEnsure(tab, header) {
+  if (useScript()) { await scall({ op: 'ensure', tab, header }); return; }
+  const id = sheetId();
+  await ensureTab(id, tab);
+  const r = await gfetch(`${API}/${id}/values/${enc(`${tab}!A1:Z1`)}`);
+  if (!r.values || !r.values.length || !r.values[0].some((c) => String(c).trim() !== '')) {
+    await gfetch(`${API}/${id}/values/${enc(`${tab}!A1`)}?valueInputOption=RAW`, { method: 'PUT', body: JSON.stringify({ values: [header] }) });
+  }
+}
+
+async function pAppend(tab, header, rows) {
+  if (!rows.length) return;
+  if (useScript()) { await scall({ op: 'append', tab, header, rows }); return; }
+  await pEnsure(tab, header);
+  await gfetch(`${API}/${sheetId()}/values/${enc(`${tab}!A1`)}:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`, {
+    method: 'POST', body: JSON.stringify({ values: rows }),
+  });
+}
+
+/** Legge le righe dati (dalla 2ª). Date come numero seriale (OAuth) o testo «aaaa-mm-gg» / «hh:mm» (Apps Script). */
+async function pRead(tab, cols) {
+  if (useScript()) return (await scall({ op: 'read', tab, range: `A2:${cols}` })).values || [];
+  const r = await gfetch(`${API}/${sheetId()}/values/${enc(`${tab}!A2:${cols}`)}?valueRenderOption=UNFORMATTED_VALUE&dateTimeRenderOption=SERIAL_NUMBER`);
+  return r.values || [];
+}
+
+async function pOverwrite(tab, rows) {
+  if (useScript()) { await scall({ op: 'overwrite', tab, rows }); return; }
+  const id = sheetId();
+  await ensureTab(id, tab);
+  await gfetch(`${API}/${id}/values:batchClear`, { method: 'POST', body: JSON.stringify({ ranges: [`${tab}!A1:Z2000`] }) });
+  await gfetch(`${API}/${id}/values/${enc(`${tab}!A1`)}?valueInputOption=RAW`, { method: 'PUT', body: JSON.stringify({ values: rows }) });
+}
+
+/* ------------------------------ setup foglio ------------------------------ */
+
 /** Crea il foglio Log_Allenamenti se manca e scrive l'intestazione se la prima riga è vuota. */
 export async function ensureSheetReady(force = false) {
   if (ready && !force) return;
-  const id = sheetId();
-  await ensureTab(id, TAB);
-  const r = await gfetch(`${API}/${id}/values/${enc(`${TAB}!A1:Z1`)}`);
-  if (!r.values || !r.values.length || !r.values[0].some((c) => String(c).trim() !== '')) {
-    await gfetch(`${API}/${id}/values/${enc(`${TAB}!A1`)}?valueInputOption=RAW`, {
-      method: 'PUT', body: JSON.stringify({ values: [HEADER] }),
-    });
-  }
+  await pEnsure(TAB, HEADER);
   ready = true;
 }
 
@@ -188,11 +254,7 @@ export async function flush({ interactive = true } = {}) {
   if (!q.length) return [];
   if (!navigator.onLine) throw Object.assign(new Error('Offline'), { code: 'OFFLINE' });
   if (!isConnected() && !interactive) throw Object.assign(new Error('Serve un tocco per riconnettere Google'), { code: 'AUTH' });
-  await ensureSheetReady();
-  const id = sheetId();
-  await gfetch(`${API}/${id}/values/${enc(`${TAB}!A1`)}:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`, {
-    method: 'POST', body: JSON.stringify({ values: q.map(seriesToRow) }),
-  });
+  await pAppend(TAB, HEADER, q.map(seriesToRow));
   setQueue([]);
   if (getSettings().weekly) {
     try { await updateWeekly(); } catch (e) { console.warn('Riepilogo settimanale non aggiornato', e); }
@@ -220,7 +282,10 @@ export const T_HEADER = [
 ];
 const TQ_KEY = 'fulcro.tqueue';
 
-export const isConfigured = () => !!(getSettings().clientId && parseSpreadsheetId(getSettings().sheetUrl));
+export const isConfigured = () => {
+  const st = getSettings();
+  return useScript() ? isScriptUrl(st.scriptUrl) : !!(st.clientId && parseSpreadsheetId(st.sheetUrl));
+};
 export const getTrainQueue = () => lsGet(TQ_KEY, []);
 
 /** Mette in coda le righe di un allenamento (idempotente per id). */
@@ -235,18 +300,7 @@ export async function flushTraining({ interactive = true } = {}) {
   if (!q.length) return [];
   if (!navigator.onLine) throw Object.assign(new Error('Offline'), { code: 'OFFLINE' });
   if (!isConnected() && !interactive) throw Object.assign(new Error('Serve un tocco per riconnettere Google'), { code: 'AUTH' });
-  const id = sheetId();
-  await ensureTab(id, T_TAB);
-  const r = await gfetch(`${API}/${id}/values/${enc(`${T_TAB}!A1:Z1`)}`);
-  if (!r.values || !r.values.length || !r.values[0].some((c) => String(c).trim() !== '')) {
-    await gfetch(`${API}/${id}/values/${enc(`${T_TAB}!A1`)}?valueInputOption=RAW`, { method: 'PUT', body: JSON.stringify({ values: [T_HEADER] }) });
-  }
-  const values = q.flatMap((x) => x.rows);
-  if (values.length) {
-    await gfetch(`${API}/${id}/values/${enc(`${T_TAB}!A1`)}:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`, {
-      method: 'POST', body: JSON.stringify({ values }),
-    });
-  }
+  await pAppend(T_TAB, T_HEADER, q.flatMap((x) => x.rows));
   lsSet(TQ_KEY, []);
   return q.map((x) => x.id);
 }
@@ -260,11 +314,7 @@ function serialToDate(v) {
 }
 const isoDay = (d) => d.toISOString().slice(0, 10);
 
-async function readLog() {
-  const id = sheetId();
-  const r = await gfetch(`${API}/${id}/values/${enc(`${TAB}!A2:N`)}?valueRenderOption=UNFORMATTED_VALUE&dateTimeRenderOption=SERIAL_NUMBER`);
-  return r.values || [];
-}
+const readLog = () => pRead(TAB, 'N');
 
 /** Importa lo storico dal foglio: serve al confronto con la serie precedente. */
 export async function importHistory() {
@@ -302,7 +352,6 @@ function isoWeek(date) {
 }
 
 export async function updateWeekly() {
-  const id = sheetId();
   const rows = await readLog();
   const groups = new Map();
   for (const r of rows) {
@@ -321,11 +370,7 @@ export async function updateWeekly() {
   const out = [...groups.values()]
     .sort((a, b) => (a.week === b.week ? a.ex.localeCompare(b.ex) : b.week.localeCompare(a.week)))
     .map((g) => [g.week, g.ex, g.n, g.tot, g.val, g.tot ? Math.round((g.val / g.tot) * 100) : '', avg(g.load), Math.round(g.ton), avg(g.ecc, 2), avg(g.conc, 2), avg(g.loss, 0)]);
-  await ensureTab(id, WEEK_TAB);
-  await gfetch(`${API}/${id}/values:batchClear`, { method: 'POST', body: JSON.stringify({ ranges: [`${WEEK_TAB}!A1:K1000`] }) });
-  await gfetch(`${API}/${id}/values/${enc(`${WEEK_TAB}!A1`)}?valueInputOption=RAW`, {
-    method: 'PUT', body: JSON.stringify({ values: [WEEK_HEADER, ...out] }),
-  });
+  await pOverwrite(WEEK_TAB, [WEEK_HEADER, ...out]);
 }
 
 /* ------------------------------ appunti ------------------------------ */

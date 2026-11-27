@@ -7,6 +7,7 @@ import { renderPrograms } from './viewPrograms.js';
 import { renderStats } from './viewStats.js';
 import { onAnalyzeTechnique, guessProfile } from './exDetail.js';
 import { loadDb } from './exdb.js';
+import { saveTextFile, onBackButton, isNative } from './native.js';
 
 const VIEWS = {
   train: { label: 'Allenamento', icon: 'dumbbell', el: '#v-train', render: renderTrain },
@@ -34,7 +35,7 @@ function buildTabbar() {
   }, icon(v.icon, 24), h('span', {}, v.label), k === 'train' ? h('i', { class: 'tab-dot', hidden: true }) : null)));
 }
 
-const APP_VERSION = '3.2';
+const APP_VERSION = '3.4';
 
 function bindSettings() {
   const ver = $('#verLabel');
@@ -54,12 +55,11 @@ function bindSettings() {
     inc.addEventListener('change', () => store.setInc(+inc.value));
   }
   const back = $('#btnBackup');
-  if (back) back.addEventListener('click', () => {
-    const blob = new Blob([store.exportBackup()], { type: 'application/json' });
-    const a = h('a', { href: URL.createObjectURL(blob), download: `fulcro-allenamenti-${new Date().toLocaleDateString('sv-SE')}.json` });
-    document.body.append(a); a.click(); a.remove();
-    setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+  if (back) back.addEventListener('click', async () => {
+    try { await saveTextFile(`fulcro-allenamenti-${new Date().toLocaleDateString('sv-SE')}.json`, store.exportBackup()); }
+    catch (e) { toast(`Backup non riuscito: ${e.message}`, 'error', 5000); }
   });
+  if (isNative()) { const fu2 = $('#btnForceUpdate'); if (fu2) fu2.hidden = true; }
   const rin = $('#restoreInput');
   if (rin) {
     $('#btnRestore').addEventListener('click', () => rin.click());
@@ -86,6 +86,13 @@ function init() {
     toast('Scegli il video della serie: nome e carico sono già compilati.', 'info', 5000);
   });
   bindSettings();
+  // Android: «indietro» chiude prima finestre e pannelli, poi torna ad Allenamento, poi esce
+  onBackButton(() => {
+    const open = [...document.querySelectorAll('dialog[open]')].pop();
+    if (open) { open.close(); return true; }
+    if (current !== 'train') { goto('train'); return true; }
+    return false;
+  });
   store.subscribe(() => { if (current !== 'tech') VIEWS[current].render(); });
 
   const saved = (() => { try { return localStorage.getItem('fulcro.view'); } catch { return null; } })();

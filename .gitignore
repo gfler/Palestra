@@ -33,3 +33,5 @@ google-services.json
 
 # Android Profiling
 *.hprof
+
+!android-app/fulcro-release.jks

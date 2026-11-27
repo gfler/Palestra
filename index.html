@@ -43,12 +43,39 @@
     <!-- 1. Scelta video -->
     <section id="intake" class="intake">
       <h1 class="headline">Guarda la tecnica,<br>non solo il peso.</h1>
-      <p class="lede">Carica il video di una serie. Fulcro conta le rep, misura angoli e tempi, e salva tutto sul tuo foglio Google.</p>
-      <label class="drop" for="fileInput">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V5m0 0-4 4m4-4 4 4M5 15v3a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-3"/></svg>
-        <span class="drop-title">Scegli o registra un video</span>
-        <span class="drop-sub">Meglio di lato, con tutto il corpo in inquadratura</span>
-      </label>
+      <div class="pages" role="tablist" aria-label="Tipo di analisi">
+        <button type="button" role="tab" class="page-tab" data-page="free" aria-selected="true"><b>Prova libera</b><small>Scegli il movimento e provalo</small></button>
+        <button type="button" role="tab" class="page-tab" data-page="prog" aria-selected="false"><b>Dalla mia scheda</b><small>Finisce nel tuo allenamento</small></button>
+      </div>
+
+      <div id="pageFree" class="page" role="tabpanel">
+        <h2 class="step"><i>1</i>Che movimento fai?</h2>
+        <p class="hint">Fulcro si calibra su questo: angoli, profondità e controlli cambiano da esercizio a esercizio.</p>
+        <div id="moveGrid" class="move-grid"></div>
+      </div>
+
+      <div id="pageProg" class="page" role="tabpanel" hidden>
+        <h2 class="step"><i>1</i>Quale esercizio della scheda?</h2>
+        <div id="dayChips" class="chips-wrap"></div>
+        <div id="progList" class="prog-list"></div>
+      </div>
+
+      <div id="stepVideo" class="step-video" hidden>
+        <h2 class="step"><i>2</i>Il video</h2>
+        <p class="picked" id="pickedLabel"></p>
+        <div class="video-btns">
+          <button id="btnRecord" class="drop drop-rec" type="button">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3.5" class="fill"/></svg>
+            <span class="drop-title">Registra ora</span>
+            <span class="drop-sub">Sagoma per inquadrarti e conto alla rovescia</span>
+          </button>
+          <label class="drop" for="fileInput">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V5m0 0-4 4m4-4 4 4M5 15v3a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-3"/></svg>
+            <span class="drop-title">Dalla galleria</span>
+            <span class="drop-sub">Meglio di lato, tutto il corpo dentro</span>
+          </label>
+        </div>
+      </div>
       <input id="fileInput" class="sr-only" type="file" accept="video/*">
       <button id="btnImport" class="link-btn" type="button">Ho già un'analisi salvata (.json)</button>
       <input id="importInput" class="sr-only" type="file" accept="application/json,.json">
@@ -58,7 +85,8 @@
     <section id="setup" class="card" hidden>
       <div class="card-head"><h2>La serie</h2><button id="btnChange" class="link-btn" type="button">Cambia video</button></div>
 
-      <fieldset class="seg" id="segMode">
+      <p class="setup-summary" id="setupSummary"></p>
+      <fieldset class="seg" id="segMode" hidden>
         <legend>Cosa vuoi analizzare</legend>
         <div class="seg-row">
           <label><input type="radio" name="mode" value="free" checked><span>Esercizio libero</span></label>
@@ -66,7 +94,7 @@
         </div>
       </fieldset>
 
-      <div id="modeFree" class="mode-box">
+      <div id="modeFree" class="mode-box" hidden>
         <button id="btnPickEx" class="btn btn-ghost" type="button">Scegli dalla libreria esercizi</button>
         <p class="hint">Oppure scrivi il nome qui sotto: il tipo di movimento si imposta da solo.</p>
       </div>
@@ -78,14 +106,25 @@
         <p class="hint" id="progHint"></p>
       </div>
 
+      <fieldset class="seg seg-profile" id="segProfile">
+        <legend>Calibrazione del movimento</legend>
+        <div class="seg-row">
+          <label><input type="radio" name="qprof" value="auto"><span>Automatico</span></label>
+          <label><input type="radio" name="qprof" value="squat"><span>Squat</span></label>
+          <label><input type="radio" name="qprof" value="rdl"><span>RDL</span></label>
+          <label><input type="radio" name="qprof" value="deadlift"><span>Stacco</span></label>
+          <label><input type="radio" name="qprof" value="bench"><span>Panca</span></label>
+          <label><input type="radio" name="qprof" value="press_v"><span>Spalle</span></label>
+        </div>
+      </fieldset>
+      <label class="field field-wide"><span>Oppure un altro movimento</span><select id="profile"></select></label>
+      <p class="hint" id="profileHint"></p>
+
       <div class="fields">
         <label class="field field-wide"><span>Esercizio</span><input id="exName" type="text" autocomplete="off" value=""  placeholder="Nome dell'esercizio"></label>
         <label class="field"><span>Carico (kg)</span><input id="load" type="number" inputmode="decimal" min="0" step="0.5" placeholder="0"></label>
         <label class="field"><span>Note / RPE</span><input id="notes" type="text" autocomplete="off" placeholder="opzionale"></label>
       </div>
-
-      <label class="field field-wide"><span>Tipo di movimento</span><select id="profile"></select></label>
-      <p class="hint" id="profileHint"></p>
 
       <button id="btnAnalyze" class="btn btn-primary" type="button">Analizza il video</button>
 
@@ -134,6 +173,13 @@
         </div>
       </div>
 
+      <fieldset class="chips hud-mode" id="hudMode">
+        <legend class="sr-only">Vista HUD</legend>
+        <div class="chips-row">
+          <label><input type="radio" name="hudmode" value="essential" checked><span>Vista essenziale</span></label>
+          <label><input type="radio" name="hudmode" value="full"><span>Completa</span></label>
+        </div>
+      </fieldset>
       <details class="layers">
         <summary>Livelli dell'HUD</summary>
         <div id="layerChips" class="chips chips-wrap"></div>
@@ -142,6 +188,7 @@
 
     <!-- 4. Report -->
     <section id="report" class="report" hidden>
+      <div id="detectBox" class="detect" hidden></div>
       <div id="qualityBox" class="quality"></div>
 
       <div class="kpis">
@@ -157,6 +204,11 @@
           <thead><tr><th>Parametro</th><th>Il tuo valore</th><th><span class="sr-only">Esito</span></th></tr></thead>
           <tbody></tbody>
         </table>
+      </div>
+
+      <div class="card" id="velCard" hidden>
+        <h2>Velocità del bilanciere</h2>
+        <div id="velBody"></div>
       </div>
 
       <div class="card" id="repsCard">
@@ -181,6 +233,8 @@
       </div>
 
       <div class="actions">
+        <button id="btnLogSet" class="btn btn-primary" type="button">Segna la serie nell'allenamento</button>
+        <button id="btnShareImg" class="btn btn-ghost" type="button">Immagine da condividere</button>
         <button id="btnAi" class="btn btn-ghost" type="button" hidden>Analisi AI della serie</button>
         <button id="btnExport" class="btn btn-ghost" type="button">Esporta analisi (.json)</button>
       </div>
@@ -207,20 +261,35 @@
       <div class="dlg-head"><h2 id="settingsTitle">Impostazioni</h2><button class="icon-btn" value="cancel" aria-label="Chiudi">×</button></div>
 
       <h3>Google Sheets</h3>
-      <label class="field field-wide"><span>Google OAuth Client ID</span><input id="setClientId" type="text" autocomplete="off" spellcheck="false" placeholder="123…apps.googleusercontent.com"></label>
-      <label class="field field-wide"><span>URL del Foglio Google</span><input id="setSheetUrl" type="url" autocomplete="off" spellcheck="false" placeholder="https://docs.google.com/spreadsheets/d/…"></label>
-      <p class="hint">Nella Google Cloud Console, tra le «Origini JavaScript autorizzate» del Client ID aggiungi: <code id="originHint"></code></p>
+      <p class="hint"><b>Metodo consigliato: Apps Script.</b> Un piccolo script dentro il tuo foglio riceve i dati: nessun login, non si disconnette mai e funziona anche nell'app Android.</p>
+      <ol class="steps">
+        <li>Apri il foglio → <b>Estensioni → Apps Script</b>, cancella tutto e incolla lo script (bottone qui sotto).</li>
+        <li>Cambia <code>cambiami</code> con una parola segreta tua e salva.</li>
+        <li><b>Esegui il deployment → Nuovo deployment → App web</b>: esegui come «Me», accesso «Chiunque». Autorizza.</li>
+        <li>Incolla qui l'URL che finisce con <code>/exec</code> e la stessa parola segreta.</li>
+      </ol>
+      <button id="btnCopyScript" class="btn btn-ghost" type="button">Copia lo script per il foglio</button>
+      <label class="field field-wide"><span>URL app web Apps Script</span><input id="setScriptUrl" type="url" autocomplete="off" spellcheck="false" placeholder="https://script.google.com/macros/s/…/exec"></label>
+      <label class="field field-wide"><span>Parola segreta</span><input id="setScriptKey" type="text" autocomplete="off" spellcheck="false" placeholder="la stessa scritta nello script"></label>
+
+      <details class="adv" id="oauthBox">
+        <summary>Metodo vecchio (OAuth, scade ogni ora)</summary>
+        <label class="field field-wide"><span>Google OAuth Client ID</span><input id="setClientId" type="text" autocomplete="off" spellcheck="false" placeholder="123…apps.googleusercontent.com"></label>
+        <label class="field field-wide"><span>URL del Foglio Google</span><input id="setSheetUrl" type="url" autocomplete="off" spellcheck="false" placeholder="https://docs.google.com/spreadsheets/d/…"></label>
+        <p class="hint">Usato solo se il campo «URL app web» è vuoto. Origine da autorizzare: <code id="originHint"></code></p>
+      </details>
 
       <label class="switch"><input id="setAuto" type="checkbox"><span>Salva automaticamente su Google Sheets dopo ogni analisi</span></label>
       <label class="switch"><input id="setWeekly" type="checkbox"><span>Aggiorna il tab «Riepilogo_Settimanale»</span></label>
 
       <div class="dlg-row">
-        <button id="btnConnect" class="btn btn-primary" type="button">Connetti Google Sheets</button>
+        <button id="btnConnect" class="btn btn-primary" type="button">Prova collegamento</button>
         <button id="btnHistory" class="btn btn-ghost" type="button">Importa storico dal foglio</button>
       </div>
       <p id="connectMsg" class="hint" role="status"></p>
 
       <h3>Allenamento</h3>
+      <label class="field field-wide"><span>La tua altezza (cm) — serve per la velocità del bilanciere</span><input id="setHeight" type="number" inputmode="numeric" min="120" max="230" placeholder="es. 178"></label>
       <label class="field field-wide"><span>Incremento di carico suggerito</span>
         <select id="setInc"><option value="1">1 kg</option><option value="1.25">1,25 kg</option><option value="2.5">2,5 kg</option><option value="5">5 kg</option></select></label>
       <div class="dlg-row">

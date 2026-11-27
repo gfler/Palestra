@@ -1,13 +1,17 @@
 // app.js — orchestrazione di Fulcro: upload, analisi, player, report, sessione e sync.
 
-import { analyze, compactReps, PROFILES } from './biomechanics.js';
+import { analyze, compactReps, PROFILES, classifyMovement, autoLabel, pct1RMFromVelocity } from './biomechanics.js';
 import { createPoseEngine } from './poseEngine.js';
 import { HudRenderer, LAYERS } from './hudRenderer.js';
 import * as sheets from './sheetsSync.js';
-import { MOVEMENT_ORDER, guessProfile } from './movements.js';
+import { MOVEMENT_ORDER, profileFromName } from './movements.js';
 import * as store from './store.js';
 import { exKey, exerciseHistory } from './training.js';
 import { pickExercise } from './exDetail.js';
+import { isNative, saveTextFile, shareBlob } from './native.js';
+import { logVideoSet } from './viewTrain.js';
+import { openRecorder } from './recorder.js';
+import { renderSetImage } from './shareCard.js';
 
 /* ------------------------------------------------------------------ */
 /* Utilità                                                              */
@@ -135,6 +139,7 @@ function renderSession() {
 /* ------------------------------------------------------------------ */
 
 const PROFILE_HINT = {
+  auto: 'Fulcro capisce da solo che esercizio è (squat, RDL, stacco, panca, spalle…). Dopo l\'analisi puoi correggerlo con un tocco.',
   generic: 'Conta le ripetizioni e misura i tempi, senza giudicare la tecnica.',
   lateral: 'Per le alzate inquadra da davanti o da dietro, con le braccia ben visibili.',
   _default: 'Metti il telefono di lato (circa 90°) con tutto il corpo in inquadratura.',
@@ -146,8 +151,9 @@ function fillProfileSelect() {
   const sel = $('#profile');
   const opt = (k) => h('option', { value: k }, PROFILES[k].label);
   sel.replaceChildren(
-    h('optgroup', { label: 'Base' }, ...['rdl', 'squat', 'bench'].map(opt)),
-    h('optgroup', { label: 'Altri movimenti' }, ...MOVEMENT_ORDER.map(opt)),
+    h('option', { value: 'auto' }, 'Automatico (lo riconosce dal video)'),
+    h('optgroup', { label: 'Base' }, ...['squat', 'rdl', 'deadlift', 'bench'].map(opt)),
+    h('optgroup', { label: 'Altri movimenti' }, ...MOVEMENT_ORDER.filter((k) => k !== 'deadlift').map(opt)),
     h('optgroup', { label: 'Qualsiasi altro' }, opt('generic')),
   );
 }
@@ -158,10 +164,37 @@ function showProfileHint() {
 }
 
 function setProfile(k, { touched = false } = {}) {
-  if (!PROFILES[k]) k = 'generic';
+  if (k !== 'auto' && !PROFILES[k]) k = 'auto';
   $('#profile').value = k;
+  syncQuickProfile();
   if (touched) setupState.profileTouched = true;
   showProfileHint();
+}
+
+/** Tiene allineati i pulsanti rapidi e il menu completo. */
+function syncQuickProfile() {
+  const k = $('#profile').value;
+  $$('input[name="qprof"]').forEach((el) => { el.checked = el.value === k; });
+}
+
+/* Calibrazione ricordata per ogni esercizio della scheda (es. «Pressa 45°» → Pressa). */
+const PROFMAP_KEY = 'fulcro.profMap';
+function profileFor(name) {
+  const m = lsGet(PROFMAP_KEY, {});
+  return m[exKey(name)] || profileFromName(name);
+}
+function rememberProfile(name, k) {
+  if (!name) return;
+  const m = lsGet(PROFMAP_KEY, {});
+  m[exKey(name)] = k;
+  lsSet(PROFMAP_KEY, m);
+}
+
+/** Profilo realmente usato: se «Automatico», quello riconosciuto dal video. */
+function effectiveProfile() {
+  const k = $('#profile').value || 'auto';
+  if (k !== 'auto') return k;
+  return (state.detected && state.detected.profile) || 'generic';
 }
 
 /** Peso dell'ultima seduta per quell'esercizio (altrimenti il riferimento della scheda). */
@@ -178,7 +211,7 @@ function lastKgFor(name, refKg) {
 function setMode(mode) {
   setupState.mode = mode;
   const el = $(`input[name="mode"][value="${mode}"]`); if (el) el.checked = true;
-  $('#modeFree').hidden = mode !== 'free';
+  $('#modeFree').hidden = true;
   $('#modeProg').hidden = mode !== 'prog';
   if (mode === 'prog') fillProgDays();
 }
@@ -216,18 +249,20 @@ function pickProgExercise() {
   const kg = lastKgFor(ex.name, ex.refKg);
   if (kg) $('#load').value = kg;
   setupState.profileTouched = false;
-  setProfile(guessProfile(ex.name));
+  setProfile(profileFor(ex.name));
+  updateSummary();
   if (state.analysis) recomputeSoon(); else onMetaChange();
 }
 
 function readSetup() {
-  const profile = $('#profile').value || 'generic';
+  const choice = $('#profile').value || 'auto';
+  const profile = effectiveProfile();
   const prog = setupState.mode === 'prog' && setupState.day;
   return {
     mode: setupState.mode,
     session: prog ? setupState.day : 'Libero',
     programName: prog ? setupState.progName : '',
-    profile,
+    profile, choice,
     exercise: $('#exName').value.trim() || PROFILES[profile].defaultName,
     load: parseFloat(String($('#load').value).replace(',', '.')) || 0,
     notes: $('#notes').value.trim(),
@@ -236,19 +271,19 @@ function readSetup() {
 
 function applySetup(s) {
   if (!s) return;
-  if (s.profile) setProfile(s.profile);
+  if (s.choice || s.profile) setProfile(s.choice || s.profile);
   if (s.exercise) { $('#exName').value = s.exercise; state.nameTouched = true; }
   if (s.load) $('#load').value = s.load;
   if (s.notes) $('#notes').value = s.notes;
 }
 
 fillProfileSelect();
-setProfile('rdl');
+setProfile('auto');
 $('#exName').addEventListener('input', () => { state.nameTouched = true; onMetaChange(); });
 $('#exName').addEventListener('change', () => {
   if (!setupState.profileTouched) {
-    const g = guessProfile($('#exName').value);
-    if (g !== 'generic' || $('#profile').value === 'generic') { setProfile(g); if (state.analysis) recomputeSoon(); }
+    const g = profileFromName($('#exName').value);
+    if (g !== $('#profile').value) { setProfile(g); if (state.analysis) recomputeSoon(); }
   }
 });
 $('#load').addEventListener('input', onMetaChange);
@@ -260,16 +295,32 @@ $('#btnPickEx').addEventListener('click', () => pickExercise({
   query: $('#exName').value, onPick: (ex) => {
     $('#exName').value = ex.n; state.nameTouched = true;
     setupState.profileTouched = false;
-    setProfile(guessProfile(ex.n));
+    setProfile(profileFromName(ex.n));
     if (state.analysis) recomputeSoon(); else onMetaChange();
   },
 }));
-$('#profile').addEventListener('change', () => {
+function onProfileChosen() {
   setupState.profileTouched = true;
+  if (setupState.mode === 'prog') rememberProfile($('#exName').value.trim(), $('#profile').value);
+  updateSummary();
+  syncQuickProfile();
   showProfileHint();
-  if (!state.nameTouched) $('#exName').value = PROFILES[$('#profile').value].defaultName;
+  if (!state.nameTouched) $('#exName').value = $('#profile').value === 'auto' ? '' : PROFILES[$('#profile').value].defaultName;
   if (state.analysis) recomputeSoon(); else onMetaChange();
-});
+}
+$('#profile').addEventListener('change', onProfileChosen);
+$$('input[name="qprof"]').forEach((el) => el.addEventListener('change', () => { $('#profile').value = el.value; onProfileChosen(); }));
+
+/** Scelta del movimento dal riquadro nel report: ricalcola subito. */
+function chooseProfileFromReport(k) {
+  setProfile(k, { touched: true });
+  if (setupState.mode === 'prog') rememberProfile($('#exName').value.trim(), k);
+  updateSummary();
+  const fromName = profileFromName($('#exName').value);
+  if (!state.nameTouched || (fromName !== 'auto' && fromName !== k && !near(fromName, k))) $('#exName').value = PROFILES[k] ? PROFILES[k].defaultName : '';
+  recompute(false);
+  toast(`Rianalizzato come ${autoLabel(k)} ✓`, 'ok');
+}
 
 /* ------------------------------------------------------------------ */
 /* Caricamento video                                                    */
@@ -293,6 +344,18 @@ function whenMetadata(v) {
   });
 }
 
+/** I video registrati con MediaRecorder (webm) non dichiarano la durata: la forziamo cercando la fine. */
+function fixDuration(v) {
+  if (Number.isFinite(v.duration) && v.duration > 0) return Promise.resolve();
+  return new Promise((resolve) => {
+    const done = () => { v.removeEventListener('durationchange', on); clearTimeout(to); v.currentTime = 0; resolve(); };
+    const on = () => { if (Number.isFinite(v.duration)) done(); };
+    const to = setTimeout(done, 4000);
+    v.addEventListener('durationchange', on);
+    v.currentTime = 1e7;
+  });
+}
+
 async function loadVideo(file) {
   if (state.analyzing) return;
   if (state.url) URL.revokeObjectURL(state.url);
@@ -305,10 +368,12 @@ async function loadVideo(file) {
   video.playbackRate = 1;
   try {
     await whenMetadata(video);
+    await fixDuration(video);
   } catch (e) {
     toast(e.message, 'error');
     return;
   }
+  updateSummary();
   const ar = video.videoWidth / video.videoHeight;
   $('#stage').style.setProperty('--ar', String(ar || 0.5625));
   $('#intake').hidden = true;
@@ -439,12 +504,14 @@ function trimWindow() {
 
 function recompute(isNew = false) {
   if (!state.raw) return;
-  const setup = readSetup();
   const m = state.rawMeta;
   const win = trimWindow();
   if (win.i1 - win.i0 < 5) { toast('La finestra della serie è troppo corta.', 'error'); return; }
+  state.detected = classifyMovement(state.raw, { fps: m.fps, aspect: m.width / m.height, window: win });
+  if ($('#profile').value === 'auto' && !state.nameTouched) $('#exName').value = PROFILES[state.detected.profile].defaultName;
+  const setup = readSetup();
   state.analysis = analyze(state.raw, {
-    fps: m.fps, aspect: m.width / m.height, profile: setup.profile, brightness: m.brightness, window: win,
+    fps: m.fps, aspect: m.width / m.height, profile: setup.profile, brightness: m.brightness, window: win, heightCm: getHeight(),
   });
   hud.setAnalysis(state.analysis);
   buildRecord(isNew);
@@ -524,6 +591,7 @@ function countTo(el, target) {
 function renderReport() {
   const a = state.analysis, s = a.summary;
   $('#report').hidden = false;
+  renderDetect();
 
   $('#qualityBox').replaceChildren(...a.quality.issues.map((q) => {
     const icon = h('span'); icon.innerHTML = ICON_WARN;
@@ -557,8 +625,250 @@ function renderReport() {
 
   renderFatigue();
   renderCompare();
+  renderVelocity();
+  const lb = $('#btnLogSet');
+  lb.hidden = !s.total;
+  state.loggedFor = null;
+  lb.className = `btn ${setupState.mode === 'prog' ? 'btn-primary' : 'btn-ghost'}`;
+  lb.textContent = store.getActive() ? 'Segna la serie nell\'allenamento in corso' : (setupState.mode === 'prog' ? `Avvia «${setupState.day}» e segna la serie` : 'Segna nell\'allenamento');
 
   $('#btnAi').hidden = !(sheets.getSettings().geminiKey && s.total);
+}
+
+/* ------------------------------------------------------------------ */
+/* Velocità del bilanciere                                              */
+/* ------------------------------------------------------------------ */
+
+const HEIGHT_KEY = 'fulcro.heightCm';
+function getHeight() { const v = Number(lsGet(HEIGHT_KEY, 0)); return v >= 120 && v <= 230 ? v : 0; }
+function setHeight(v) { lsSet(HEIGHT_KEY, Number(v) || 0); }
+const ms = (v) => (Number.isFinite(v) ? v.toFixed(2).replace('.', ',') : '–');
+
+function renderVelocity() {
+  const a = state.analysis, s = a.summary, card = $('#velCard'), body = $('#velBody');
+  if (!s.total) { card.hidden = true; return; }
+  card.hidden = false;
+  if (!getHeight()) {
+    const inp = h('input', { type: 'number', inputmode: 'numeric', min: '120', max: '230', placeholder: 'es. 178', 'aria-label': 'Altezza in cm' });
+    body.replaceChildren(
+      h('p', { class: 'muted' }, 'Per misurare la velocità in m/s Fulcro usa la lunghezza delle tue gambe come metro. Dimmi quanto sei alto:'),
+      h('div', { class: 'inline-form' }, inp, h('span', {}, 'cm'), h('button', { type: 'button', class: 'btn btn-primary btn-sm', onclick: () => {
+        const v = Number(inp.value);
+        if (!(v >= 120 && v <= 230)) { toast('Altezza tra 120 e 230 cm', 'error'); return; }
+        setHeight(v); recompute(false);
+      } }, 'Calcola')));
+    return;
+  }
+  const vels = a.reps.map((r) => r.vel);
+  if (!vels.some(Number.isFinite)) { body.replaceChildren(h('p', { class: 'muted' }, 'Velocità non misurabile in questo video (gambe poco visibili).')); return; }
+  const max = Math.max(...vels.filter(Number.isFinite), 0.1);
+  const bars = h('div', { class: 'vbars' }, ...a.reps.map((r) => h('div', { class: 'vbar', dataset: { valid: r.valid ? '1' : '0' } },
+    h('i', { style: `height:${Number.isFinite(r.vel) ? Math.max(6, (r.vel / max) * 100) : 4}%` }),
+    h('b', {}, ms(r.vel)), h('small', {}, `#${r.n}`))));
+  const load = readSetup().load;
+  const pct = pct1RMFromVelocity(a.meta.profile, s.velBest);
+  const rm = pct && load > 0 ? load / (pct / 100) : null;
+  const zone = (v) => (v >= 1 ? 'velocità / esplosività' : v >= 0.75 ? 'forza-velocità' : v >= 0.5 ? 'forza' : v >= 0.3 ? 'forza massima' : 'vicino al massimale');
+  body.replaceChildren(...[
+    h('div', { class: 'vstats' },
+      h('div', {}, h('span', {}, 'Media'), h('b', {}, `${ms(s.velMean)} m/s`)),
+      h('div', {}, h('span', {}, 'Migliore'), h('b', {}, `${ms(s.velBest)} m/s`)),
+      h('div', {}, h('span', {}, 'Perdita'), h('b', {}, Number.isFinite(s.velLoss) ? `${Math.round(s.velLoss)}%` : '–'))),
+    bars,
+    h('p', { class: 'muted' }, `Zona: ${zone(s.velBest)}. `,
+      Number.isFinite(s.velLoss) ? (s.velLoss > 30 ? 'Hai perso più del 30%: serie molto vicina al cedimento.' : s.velLoss > 20 ? 'Perdita 20–30%: lavoro intenso, 1–3 rep in riserva.' : 'Perdita sotto il 20%: avevi ancora diverse rep.') : ''),
+    pct ? h('p', { class: 'vrm' }, h('b', {}, rm ? `1RM stimato ≈ ${Math.round(rm)} kg` : `≈ ${Math.round(pct)}% del massimale`),
+      h('small', {}, rm ? ` (questo carico ≈ ${Math.round(pct)}% del massimale)` : ' — inserisci il carico per il 1RM')) : null,
+    h('p', { class: 'hint' }, `Stima da video 2D tarata sulla tua altezza (${getHeight()} cm): utile per confrontare le tue serie, non è un encoder.`)].filter(Boolean));
+}
+
+/* ------------------------------------------------------------------ */
+/* Due pagine: Prova libera / Dalla mia scheda                          */
+/* ------------------------------------------------------------------ */
+
+const MOVE_CARDS = [
+  ['auto', 'Automatico', 'Lo riconosce dal video'], ['squat', 'Squat', 'Bilanciere, goblet, front'], ['rdl', 'Stacco rumeno', 'RDL, gambe tese'],
+  ['deadlift', 'Stacco da terra', 'Classico, sumo, trap bar'], ['bench', 'Panca', 'Piana, inclinata, chest press'], ['press_v', 'Spalle', 'Military, lento avanti'],
+  ['pull_v', 'Lat / trazioni', 'Lat machine, trazioni'], ['pull_h', 'Rematore', 'Bilanciere, cavo, macchina'], ['hip_ext', 'Hip thrust', 'Ponte glutei'],
+  ['knee_press', 'Pressa / affondi', 'Leg press, split squat'], ['knee_iso', 'Leg ext / curl', 'Macchine per le gambe'], ['curl', 'Curl', 'Bicipiti'],
+  ['triceps', 'Tricipiti', 'Pushdown, french'], ['lateral', 'Alzate', 'Laterali o frontali'], ['generic', 'Altro', 'Conta rep e tempi'],
+];
+const GLYPH = {
+  squat: 'M12 3.5a2 2 0 1 1 0 4 2 2 0 0 1 0-4ZM4 9h16M12 9v4l-4 3 2 5M12 13l4 3-2 5',
+  rdl: 'M6 6a2 2 0 1 1 4 0 2 2 0 0 1-4 0ZM9 8l7 4M16 12l1 9M16 12l-3 9M11 10v6M8 16h6',
+  deadlift: 'M12 3.5a2 2 0 1 1 0 4 2 2 0 0 1 0-4ZM12 8v6M12 14l-3 7M12 14l3 7M7 11h10M7 9v4M17 9v4',
+  bench: 'M3 15h18M6 15v4M18 15v4M7 12h9M9 12l1-6M14 12l-1-6M7 6h10',
+  press_v: 'M12 6a2 2 0 1 1 0 4 2 2 0 0 1 0-4ZM12 10v6l-2 5M12 16l2 5M7 4l1 7M17 4l-1 7M5 4h14',
+  pull_v: 'M4 4h16M8 4l1 6M16 4l-1 6M12 8a2 2 0 1 1 0 4 2 2 0 0 1 0-4ZM12 12v5l-2 4M12 17l2 4',
+  pull_h: 'M5 7a2 2 0 1 1 4 0 2 2 0 0 1-4 0ZM8 9l7 3M15 12l-1 9M15 12l2 9M11 11l2 5M19 16h3',
+  hip_ext: 'M3 18h7M10 18l4-6h6M20 12l-1 6M6 15a2 2 0 1 1 0-4 2 2 0 0 1 0 4ZM11 9h8',
+  knee_press: 'M4 20l6-6M10 14l5 1M15 15l3-8M14 5l6 3M5 13a2 2 0 1 1 0-4 2 2 0 0 1 0 4Z',
+  knee_iso: 'M4 14h8M12 14v6M4 10h6l2 4M14 14l6-4M20 10l1 2',
+  curl: 'M12 3.5a2 2 0 1 1 0 4 2 2 0 0 1 0-4ZM12 8v13M12 9l-3 5 3 2M16 9v3',
+  triceps: 'M12 3.5a2 2 0 1 1 0 4 2 2 0 0 1 0-4ZM12 8v13M12 9l3 5-3 2M8 4v8',
+  lateral: 'M12 3.5a2 2 0 1 1 0 4 2 2 0 0 1 0-4ZM12 8v13M4 9h16M3 8v2M21 8v2',
+  generic: 'M4 12h4l2-5 4 10 2-5h4',
+  auto: 'M12 3l2 5 5 2-5 2-2 5-2-5-5-2 5-2 2-5ZM19 15l1 2 2 1-2 1-1 2-1-2-2-1 2-1 1-2Z',
+};
+const glyph = (k) => { const el = h('span', { class: 'mv-ic', 'aria-hidden': 'true' }); el.innerHTML = `<svg viewBox="0 0 24 24"><path d="${GLYPH[k] || GLYPH.generic}"/></svg>`; return el; };
+
+const intake = { page: 'free', picked: null, day: 0 };
+
+function setPage(p) {
+  intake.page = p; intake.picked = null;
+  $$('.page-tab').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.page === p)));
+  $('#pageFree').hidden = p !== 'free';
+  $('#pageProg').hidden = p !== 'prog';
+  $('#stepVideo').hidden = true;
+  if (p === 'prog') renderProgPage(); else renderMoveGrid();
+}
+$$('.page-tab').forEach((b) => b.addEventListener('click', () => setPage(b.dataset.page)));
+
+function renderMoveGrid() {
+  $('#moveGrid').replaceChildren(...MOVE_CARDS.map(([k, label, sub]) => h('button', {
+    type: 'button', class: `mv-card${intake.picked === k ? ' on' : ''}`, 'aria-pressed': String(intake.picked === k),
+    onclick: () => {
+      intake.picked = k;
+      setMode('free'); setupState.day = ''; setupState.progName = '';
+      state.nameTouched = false; $('#exName').value = k === 'auto' ? '' : PROFILES[k].defaultName;
+      setProfile(k, { touched: true });
+      renderMoveGrid(); showVideoStep(label);
+    },
+  }, glyph(k), h('b', {}, label), h('small', {}, sub))));
+}
+
+function renderProgPage() {
+  const prog = store.activeProgram();
+  const list = $('#progList'), chips = $('#dayChips');
+  if (!prog || !prog.days.length) {
+    chips.replaceChildren();
+    list.replaceChildren(h('div', { class: 'empty-card' }, h('b', {}, 'Nessuna scheda in uso'), h('p', { class: 'muted' }, 'Crea o incolla la tua scheda nella sezione Schede: poi qui scegli l\'esercizio e il video finisce nella serie giusta.'),
+      h('button', { type: 'button', class: 'btn btn-ghost', onclick: () => $('#tabbar button[data-view="prog"]').click() }, 'Vai alle Schede')));
+    return;
+  }
+  const W = store.getActive();
+  if (W && W.programId === prog.id && !intake.dayTouched) { const di = prog.days.findIndex((d) => d.id === W.dayId); if (di >= 0) intake.day = di; }
+  intake.day = Math.min(intake.day, prog.days.length - 1);
+  chips.replaceChildren(...prog.days.map((d, i) => h('button', { type: 'button', class: 'chip-btn', 'aria-pressed': String(i === intake.day), onclick: () => { intake.day = i; intake.dayTouched = true; intake.picked = null; $('#stepVideo').hidden = true; renderProgPage(); } }, d.name)));
+  const day = prog.days[intake.day];
+  list.replaceChildren(...day.exercises.map((e, i) => {
+    const k = profileFor(e.name);
+    const sel = h('select', { class: 'mv-select', 'aria-label': `Movimento di ${e.name}`, onclick: (ev) => ev.stopPropagation(), onchange: (ev) => {
+      rememberProfile(e.name, ev.target.value); toast(`«${e.name}» ora si analizza come ${autoLabel(ev.target.value)} ✓`, 'ok');
+      if (intake.picked === i) setProfile(ev.target.value, { touched: true });
+      renderProgPage();
+    } }, h('option', { value: 'auto' }, 'Automatico'), ...Object.keys(PROFILES).map((p) => h('option', { value: p, selected: p === k }, autoLabel(p))));
+    if (k === 'auto') sel.value = 'auto';
+    const done = W ? (W.exercises.find((x) => exKey(x.name) === exKey(e.name))?.sets || []).filter((x) => x.done && x.type !== 'warmup').length : 0;
+    return h('div', { class: `px-card${intake.picked === i ? ' on' : ''}`, role: 'button', tabindex: '0', onclick: () => pickFromProg(prog, intake.day, i), onkeydown: (ev) => { if (ev.key === 'Enter') pickFromProg(prog, intake.day, i); } },
+      glyph(k === 'auto' ? 'auto' : k),
+      h('span', { class: 'px-t' }, h('b', {}, e.name), h('small', {}, `${e.sets} × ${e.repMin === e.repMax ? e.repMin : `${e.repMin}-${e.repMax}`}${done ? ` · ${done} serie fatte oggi` : ''}`)),
+      h('label', { class: 'px-mv' }, h('span', {}, 'Analizza come'), sel));
+  }));
+}
+
+function pickFromProg(prog, di, ei) {
+  intake.picked = ei;
+  setMode('prog');
+  $('#progDay').value = String(di); fillProgExercises();
+  $('#progEx').value = String(ei);
+  pickProgExercise();
+  renderProgPage();
+  const ex = prog.days[di].exercises[ei];
+  showVideoStep(`${ex.name} · ${autoLabel(profileFor(ex.name))}`);
+}
+
+function showVideoStep(label) {
+  $('#pickedLabel').textContent = label;
+  $('#stepVideo').hidden = false;
+  $('#stepVideo').scrollIntoView({ behavior: reduceMotion ? 'auto' : 'smooth', block: 'center' });
+}
+
+function updateSummary() {
+  const k = $('#profile').value;
+  const name = $('#exName').value.trim();
+  const mv = k === 'auto' ? 'riconoscimento automatico' : autoLabel(k);
+  $('#setupSummary').replaceChildren(...[
+    h('span', { class: 'sum-tag' }, setupState.mode === 'prog' ? `Scheda · ${setupState.day}` : 'Prova libera'),
+    h('b', {}, setupState.mode === 'prog' ? name : mv),
+    setupState.mode === 'prog' ? h('small', {}, ` analizzato come ${mv}`) : null,
+    h('button', { type: 'button', class: 'link-btn', onclick: backToIntake }, 'Cambia esercizio')].filter(Boolean));
+}
+
+function backToIntake() {
+  video.pause();
+  ['#setup', '#player', '#report', '#dock'].forEach((sel) => { $(sel).hidden = true; });
+  $('#intake').hidden = false;
+  setPage(setupState.mode === 'prog' ? 'prog' : 'free');
+  window.scrollTo({ top: 0 });
+}
+
+$('#btnRecord').addEventListener('click', async () => {
+  const res = await openRecorder({ title: $('#pickedLabel').textContent });
+  if (!res) return;
+  if (res.error) { toast(res.error, 'error', 6000); return; }
+  await loadVideo(res.file);
+  toast('Video pronto: tocca «Analizza il video»', 'ok');
+});
+
+$('#btnLogSet').addEventListener('click', () => {
+  const a = state.analysis;
+  if (!a || !a.summary.total) return;
+  if (state.loggedFor === a) { $('#tabbar button[data-view="train"]').click(); return; }
+  const st = readSetup();
+  const prog = setupState.mode === 'prog' ? store.activeProgram() : null;
+  const day = prog ? prog.days.find((d) => d.name === setupState.day) : null;
+  const res = logVideoSet({ name: st.exercise, kg: st.load, reps: a.summary.total, valid: a.summary.valid, vel: a.summary.velMean, profile: a.meta.profile, program: prog, day });
+  const msg = `${res.started ? 'Allenamento avviato · ' : ''}Serie ${res.setNo} di ${st.exercise}: ${st.load || 0} kg × ${a.summary.total} ✓`;
+  toast(msg, 'ok', 5000);
+  state.loggedFor = a;
+  $('#btnLogSet').textContent = 'Segnata ✓ — vai all\'allenamento';
+});
+
+$('#btnShareImg').addEventListener('click', async () => {
+  if (!state.analysis) return;
+  try {
+    const blob = await renderSetImage({ setup: readSetup(), analysis: state.analysis, label: autoLabel(state.analysis.meta.profile) });
+    await shareBlob(`fulcro_${localDate()}.png`, blob, 'La mia serie su Fulcro');
+  } catch (e) { toast(`Immagine non creata: ${e.message}`, 'error'); }
+});
+
+renderMoveGrid();
+
+// Movimenti che si somigliano abbastanza da non meritare un avviso
+const NEAR = [['squat', 'knee_press'], ['rdl', 'deadlift'], ['press_v', 'pull_v'], ['curl', 'triceps']];
+const near = (a, b) => NEAR.some((g) => g.includes(a) && g.includes(b));
+
+function renderDetect() {
+  const box = $('#detectBox');
+  const det = state.detected;
+  const choice = $('#profile').value;
+  const used = state.analysis.meta.profile;
+  if (!det) { box.hidden = true; return; }
+  const chip = (k, primary = false) => h('button', { type: 'button', class: `chip-btn${primary ? ' chip-primary' : ''}`, onclick: () => chooseProfileFromReport(k) }, primary ? `Rianalizza come ${autoLabel(k)}` : autoLabel(k));
+  const others = h('select', { class: 'detect-select', 'aria-label': 'Altro movimento', onchange: (e) => { if (e.target.value) chooseProfileFromReport(e.target.value); } },
+    h('option', { value: '' }, 'Altro…'),
+    ...Object.keys(PROFILES).filter((k) => k !== used).map((k) => h('option', { value: k }, PROFILES[k].label)));
+  let title, text, chips, level = 'info';
+  if (choice === 'auto') {
+    const unsure = det.profile === 'generic';
+    title = unsure ? 'Non sono sicuro di che esercizio sia' : `Riconosciuto: ${autoLabel(det.profile)}`;
+    text = unsure ? `Ho contato le rep in modo generico (${det.why}). Dimmi tu cos'è e rifaccio i calcoli:` : `Sicurezza ${det.confidence} — ${det.why}. Non è giusto? Tocca quello corretto:`;
+    chips = [...['squat', 'rdl', 'deadlift', 'bench', 'press_v'].filter((k) => k !== det.profile).slice(0, 4).map((k) => chip(k)), others];
+    level = unsure ? 'warn' : 'info';
+  } else if (det.profile !== 'generic' && det.profile !== used && !near(det.profile, used) && det.confidence !== 'bassa') {
+    title = `Hai scelto ${autoLabel(used)}, ma sembra ${/^[aeiou]/i.test(autoLabel(det.profile)) ? 'un' : 'uno'} ${autoLabel(det.profile)}`;
+    text = `Nel video ${det.why}. Se hai ragione tu ignora questo avviso.`;
+    chips = [chip(det.profile, true), others];
+    level = 'warn';
+  } else {
+    title = `Analizzato come ${autoLabel(used)}`;
+    text = 'Scelto da te.';
+    chips = [others];
+  }
+  box.dataset.level = level;
+  box.replaceChildren(h('div', { class: 'detect-head' }, h('b', {}, title), h('span', {}, text)), h('div', { class: 'chips-wrap' }, ...chips));
+  box.hidden = false;
 }
 
 function renderFatigue() {
@@ -717,10 +1027,23 @@ function renderTicks() {
 }
 
 // Livelli HUD
+const HUD_PRESET = { essential: ['segments', 'trail', 'bar'], full: LAYERS.map((l) => l.key) };
+function applyHudMode(mode) {
+  const on = HUD_PRESET[mode] || HUD_PRESET.essential;
+  LAYERS.forEach((l) => hud.setLayer(l.key, on.includes(l.key)));
+  $$('#layerChips input').forEach((el, i) => { el.checked = on.includes(LAYERS[i].key); });
+  lsSet('fulcro.hudMode', mode);
+}
+$$('input[name="hudmode"]').forEach((el) => el.addEventListener('change', () => applyHudMode(el.value)));
 $('#layerChips').replaceChildren(...LAYERS.map((l) => h('label', {},
   h('input', { type: 'checkbox', checked: true, onchange: (e) => hud.setLayer(l.key, e.target.checked) }),
   h('span', {}, l.label),
 )));
+{
+  const m = lsGet('fulcro.hudMode', 'essential');
+  const el = $(`input[name="hudmode"][value="${m}"]`); if (el) el.checked = true;
+  applyHudMode(m);
+}
 
 /* ------------------------------------------------------------------ */
 /* Invio a Google Sheets                                                */
@@ -734,7 +1057,7 @@ function updateBadge() {
   if (q.length) { state_ = 'queued'; text = `In coda offline (${q.length})`; }
   else if (state.lastSaved) { state_ = 'saved'; text = 'Salvato su Sheets ✓'; }
   else if (sheets.isConnected()) { state_ = 'idle'; text = 'Sheets connesso'; }
-  else if (st.clientId && st.sheetUrl) text = 'Sheets non connesso';
+  else if (sheets.isConfigured()) text = 'Sheets non connesso';
   b.dataset.state = state_;
   b.textContent = text;
 }
@@ -761,7 +1084,8 @@ function explain(err) {
   switch (err && err.code) {
     case 'OFFLINE': return 'In coda offline: si invia al ritorno della rete';
     case 'AUTH': return 'Serve riconnettere Google: tocca il badge in alto';
-    case 'CONFIG': return 'Imposta Client ID e URL del foglio nelle impostazioni';
+    case 'CONFIG': return 'Collega il foglio nelle impostazioni (URL dello script)';
+    case 'KEY': return 'Parola segreta diversa da quella nello script';
     case 'ACCESS': return 'Accesso al foglio negato: controlla URL e permessi';
     default: return (err && err.message) || 'Invio non riuscito';
   }
@@ -770,9 +1094,8 @@ function explain(err) {
 async function sendRecord(auto = false) {
   const rec = state.record;
   if (!rec || rec.sync === 'saved') return;
-  const st = sheets.getSettings();
-  if (!st.clientId || !st.sheetUrl) {
-    if (!auto) { toast('Prima imposta Client ID e URL del foglio.', 'error'); openSettings(); }
+  if (!sheets.isConfigured()) {
+    if (!auto) { toast('Prima collega il foglio Google nelle impostazioni.', 'error'); openSettings(); }
     rec.sync = 'queued'; sheets.enqueue({ ...rec }); persistRecord(rec); renderSession(); updateDock(); updateBadge();
     if (auto) setSeriesStatus('queued', 'Configura Google Sheets per salvare');
     return;
@@ -868,18 +1191,17 @@ const round = (v, d) => (Number.isFinite(v) ? Math.round(v * 10 ** d) / 10 ** d 
 /* Esporta / importa analisi                                            */
 /* ------------------------------------------------------------------ */
 
-$('#btnExport').addEventListener('click', () => {
+$('#btnExport').addEventListener('click', async () => {
   if (!state.raw) return;
   const r4 = (v) => Math.round(v * 1e4) / 1e4;
   const data = {
     app: 'fulcro', v: 1, ...state.rawMeta, setup: readSetup(), trim: state.trim,
     raw: state.raw.map((f) => (f ? f.map((l) => [r4(l[0]), r4(l[1]), Math.round(l[2] * 100) / 100]) : null)),
   };
-  const blob = new Blob([JSON.stringify(data)], { type: 'application/json' });
-  const a = h('a', { href: URL.createObjectURL(blob), download: `fulcro_${localDate()}_${readSetup().exercise.replace(/[^\w-]+/g, '_')}.json` });
-  document.body.append(a); a.click(); a.remove();
-  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
-  toast('Analisi esportata: ricaricandola non rifai la pre-analisi.', 'ok');
+  try {
+    const ok = await saveTextFile(`fulcro_${localDate()}_${readSetup().exercise.replace(/[^\w-]+/g, '_')}.json`, JSON.stringify(data));
+    if (ok) toast('Analisi esportata: ricaricandola non rifai la pre-analisi.', 'ok');
+  } catch (e) { toast(`Esportazione non riuscita: ${e.message}`, 'error'); }
 });
 
 $('#btnImport').addEventListener('click', () => $('#importInput').click());
@@ -934,6 +1256,11 @@ const dlg = $('#settings');
 function openSettings() {
   const s = sheets.getSettings();
   $('#setClientId').value = s.clientId;
+  $('#setHeight').value = getHeight() || '';
+  $('#setScriptUrl').value = s.scriptUrl;
+  $('#setScriptKey').value = s.scriptKey;
+  $('#oauthBox').hidden = sheets.isNativeApp();
+  $('#oauthBox').open = !s.scriptUrl && !!s.clientId;
   $('#setSheetUrl').value = s.sheetUrl;
   $('#setAuto').checked = s.autoSync;
   $('#setWeekly').checked = s.weekly;
@@ -947,12 +1274,15 @@ $('#btnSettings').addEventListener('click', openSettings);
 function readSettingsForm() {
   return {
     clientId: $('#setClientId').value, sheetUrl: $('#setSheetUrl').value,
+    scriptUrl: $('#setScriptUrl').value, scriptKey: $('#setScriptKey').value,
     autoSync: $('#setAuto').checked, weekly: $('#setWeekly').checked, geminiKey: $('#setGemini').value,
   };
 }
 dlg.addEventListener('close', () => {
   if (dlg.returnValue === 'save') {
     sheets.saveSettings(readSettingsForm());
+    const hv = Number($('#setHeight').value);
+    if (hv >= 120 && hv <= 230) { if (hv !== getHeight()) { setHeight(hv); if (state.raw) recompute(false); } }
     toast('Impostazioni salvate', 'ok');
     updateBadge();
     if (state.analysis) $('#btnAi').hidden = !(sheets.getSettings().geminiKey && state.analysis.summary.total);
@@ -963,12 +1293,14 @@ dlg.addEventListener('close', () => {
 $('#btnConnect').addEventListener('click', async () => {
   const msg = $('#connectMsg');
   const f = readSettingsForm();
-  if (!sheets.parseSpreadsheetId(f.sheetUrl)) { msg.textContent = 'L\'URL del foglio non è valido: incolla l\'indirizzo completo.'; return; }
+  const viaScript = !!f.scriptUrl.trim() || sheets.isNativeApp();
+  if (viaScript && !sheets.isScriptUrl(f.scriptUrl)) { msg.textContent = 'L\'URL dello script non è valido: deve iniziare con https://script.google.com/ e finire con /exec.'; return; }
+  if (!viaScript && !sheets.parseSpreadsheetId(f.sheetUrl)) { msg.textContent = 'Incolla l\'URL dello script (consigliato) oppure, nel metodo vecchio, l\'URL completo del foglio.'; return; }
   sheets.saveSettings(f);
-  msg.textContent = 'Apro l\'autorizzazione Google…';
+  msg.textContent = viaScript ? 'Contatto lo script del foglio…' : 'Apro l\'autorizzazione Google…';
   try {
     await sheets.connect({ interactive: true });
-    msg.textContent = 'Connesso. Controllo il foglio…';
+    msg.textContent = 'Collegato. Controllo il foglio…';
     await sheets.ensureSheetReady(true);
     msg.textContent = 'Pronto: foglio «Log_Allenamenti» verificato e intestazione presente ✓';
     updateBadge();
@@ -977,6 +1309,14 @@ $('#btnConnect').addEventListener('click', async () => {
   } catch (e) {
     msg.textContent = explain(e);
   }
+});
+
+$('#btnCopyScript').addEventListener('click', async () => {
+  try {
+    const code = await (await fetch('apps-script/Code.gs', { cache: 'no-cache' })).text();
+    const ok = await sheets.copyText(code);
+    $('#connectMsg').textContent = ok ? 'Script copiato ✓ Ora incollalo in Estensioni → Apps Script del tuo foglio.' : 'Copia non riuscita: apri il file apps-script/Code.gs dal repository.';
+  } catch { $('#connectMsg').textContent = 'Script non raggiungibile offline: apri apps-script/Code.gs dal repository.'; }
 });
 
 $('#btnHistory').addEventListener('click', async () => {
@@ -1010,8 +1350,8 @@ $('#btnInstall').addEventListener('click', async () => {
 /* ------------------------------------------------------------------ */
 
 window.fulcroTech = {
-  prefill({ exercise, load, profile, fromProgram }) {
-    applySetup({ exercise, load: load || 0, profile });
+  prefill({ exercise, load, fromProgram }) {
+    applySetup({ exercise, load: load || 0, profile: profileFor(exercise) });
     setupState.profileTouched = false;
     const prog = fromProgram ? store.activeProgram() : null;
     const di = prog ? prog.days.findIndex((d) => d.exercises.some((e) => exKey(e.name) === exKey(exercise))) : -1;
@@ -1021,12 +1361,14 @@ window.fulcroTech = {
       $('#progEx').value = String(prog.days[di].exercises.findIndex((e) => exKey(e.name) === exKey(exercise)));
       setupState.progName = prog.name; setupState.day = prog.days[di].name;
     } else { setupState.day = ''; setupState.progName = ''; setMode('free'); }
+    if (di >= 0) { setPage('prog'); intake.day = di; intake.dayTouched = true; pickFromProg(prog, di, prog.days[di].exercises.findIndex((e) => exKey(e.name) === exKey(exercise))); }
+    updateSummary();
     onMetaChange();
   },
 };
 renderSession();
 updateBadge();
 
-if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
+if ('serviceWorker' in navigator && location.protocol.startsWith('http') && !isNative()) {
   window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch((e) => console.warn('SW non registrato', e)));
 }

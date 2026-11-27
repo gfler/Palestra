@@ -154,9 +154,9 @@ export function guessProfile(name) {
   if (has(n, ['rdl', 'romanian', 'rumeno', 'stiff', 'good morning', 'stacco gambe tese'])) return 'rdl';
   if (has(n, ['hip thrust', 'glute bridge', 'ponte', 'thrust'])) return 'hip_ext';
   if (has(n, ['leg extension', 'leg curl', 'hamstring curl', 'estensioni gambe', 'estensione gambe', 'leg curls'])) return 'knee_iso';
-  if (has(n, ['deadlift', 'stacco', 'sumo', 'trap bar'])) return 'deadlift';
   if (has(n, ['leg press', 'pressa', 'lunge', 'affond', 'split squat', 'bulgarian', 'bulgaro', 'step up', 'hack'])) return 'knee_press';
   if (has(n, ['squat'])) return 'squat';
+  if (has(n, ['deadlift', 'stacco', 'sumo', 'trap bar'])) return 'deadlift';
   if (has(n, ['lateral raise', 'alzate laterali', 'alzata laterale', 'front raise', 'alzate frontali', 'alzata frontale'])) return 'lateral';
   if (has(n, ['pulldown', 'pull down', 'lat machine', 'pull up', 'pullup', 'chin up', 'trazioni', 'trazione', 'lat pull'])) return 'pull_v';
   if (has(n, ['row', 'rematore', 'pulley', 't bar', 'seated cable'])) return 'pull_h';
@@ -165,4 +165,10 @@ export function guessProfile(name) {
   if (has(n, ['curl'])) return 'curl';
   if (has(n, ['panca', 'bench', 'chest press', 'distensioni', 'push up', 'pushup', 'flessioni', 'dip', 'dips', 'pectoral machine', 'incline', 'decline', 'inclinata', 'declinata', 'press'])) return 'bench';
   return 'generic';
+}
+
+/** Come guessProfile, ma se dal nome non si capisce lascia decidere al video ('auto'). */
+export function profileFromName(name) {
+  const g = guessProfile(name);
+  return g === 'generic' ? 'auto' : g;
 }
