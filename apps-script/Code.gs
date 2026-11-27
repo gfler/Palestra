@@ -1,18 +1,16 @@
-/**
- * Fulcro → Google Sheets (metodo «Apps Script», non scade mai).
- *
- * Installazione (una volta sola, 3 minuti):
- *  1. Apri il tuo Foglio Google → menu Estensioni → Apps Script.
- *  2. Cancella tutto e incolla questo file. Cambia la CHIAVE qui sotto con una parola segreta tua.
- *  3. Salva (icona disco) → Esegui il deployment → Nuovo deployment → tipo «App web».
- *     - Esegui come: «Me»
- *     - Chi ha accesso: «Chiunque»
- *  4. Autorizza (Avanzate → Vai al progetto → Consenti). Copia l'URL che finisce con /exec.
- *  5. In Fulcro: Impostazioni → Google Sheets → incolla URL e chiave → «Prova collegamento».
- *
- * Se modifichi lo script: Esegui il deployment → Gestisci deployment → matita → Versione: «Nuova versione».
- * L'URL resta lo stesso.
- */
+// Fulcro → Google Sheets (metodo «Apps Script», non scade mai).
+//
+// Installazione (una volta sola, 3 minuti):
+//  1. Apri il tuo Foglio Google → menu Estensioni → Apps Script.
+//  2. Cancella tutto e incolla questo file. Cambia la CHIAVE qui sotto con una parola segreta tua.
+//  3. Salva (icona disco) → Esegui il deployment → Nuovo deployment → tipo «App web».
+//     - Esegui come: «Me»
+//     - Chi ha accesso: «Chiunque»
+//  4. Autorizza (Avanzate → Vai al progetto → Consenti). Copia l'URL che finisce con /exec.
+//  5. In Fulcro: Impostazioni → Google Sheets → incolla URL e chiave → «Prova collegamento».
+//
+// Se modifichi lo script: Esegui il deployment → Gestisci deployment → matita → Versione: «Nuova versione».
+// L'URL resta lo stesso.
 const CHIAVE = 'cambiami';
 
 function doPost(e) {
